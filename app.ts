@@ -26,7 +26,7 @@ app.use(cookieParser());
 // enable cors
 app.use(
   cors({
-    origin: [process.env.ADMIN_DASHBOARD_URL, process.env.PAYMENT_PAGE_URL,],
+    origin: '*',
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true, // allow cookies/auth headers
   })
