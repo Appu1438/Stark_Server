@@ -2,8 +2,11 @@ require("dotenv").config();
 import { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import prisma from "../utils/prisma";
-import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, User } from "../db/schema";
+import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride, Transaction, User } from "../db/schema";
+import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
+
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
 // ------------------- LOGIN ADMIN -------------------
 export const loginAdmin = async (req: Request, res: Response) => {
@@ -35,7 +38,7 @@ export const loginAdmin = async (req: Request, res: Response) => {
       }
 
       await admin.findByIdAndUpdate(foundAdmin._id, updateData);
-      return res.status(401).json({ message: "Invalid credentials." });
+      return res.status(403).json({ message: "Invalid credentials." });
     }
 
     // ✅ Handle inactive account
@@ -61,11 +64,19 @@ export const loginAdmin = async (req: Request, res: Response) => {
       lockedUntil: null,
     });
 
-    const accessToken = jwt.sign(
-      { id: foundAdmin._id, role: foundAdmin.role },
-      process.env.ACCESS_TOKEN_SECRET!,
-      { expiresIn: "1d" }
-    );
+    const accessToken = generateAccessTokenAdmin(foundAdmin)
+    const refreshToken = generateRefreshTokenAdmin(foundAdmin)
+
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // only over HTTPS in production
+      sameSite: "strict",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+
 
     // ✅ Convert Mongoose doc → plain object & remove password
     const adminObj = foundAdmin.toObject();
@@ -89,12 +100,26 @@ export const loginAdmin = async (req: Request, res: Response) => {
 // ------------------- LOGOUT ADMIN -------------------
 export const logoutAdmin = async (req: any, res: Response) => {
   const { id } = req.params
+  console.log(id)
   try {
     if (!id) {
       return res.status(401).json({ message: "Not authenticated" });
     }
     console.log(id)
     await admin.findByIdAndUpdate(id, { lastLoggedOut: new Date() });
+
+
+    const isDev = process.env.NODE_ENV !== "production";
+
+    res.cookie("refreshToken", null, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // only over HTTPS in production
+      sameSite: "strict",
+      path: "/",
+      expires: new Date(0),
+    });
+
+
 
     return res.status(200).json({ message: "Logout successful" });
   } catch (error) {
@@ -103,6 +128,36 @@ export const logoutAdmin = async (req: any, res: Response) => {
   }
 };
 
+
+// ------------------- REFRESH ADMIN -------------------
+export const refreshTokenAdmin = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies.refreshToken; // Access the cookie
+    console.log(refreshToken)
+    console.log("Cookies received:", req.cookies); // Log all cookies
+
+
+    if (!refreshToken) return res.status(401).json({ message: "Refresh token required" });
+
+    // Verify token
+    jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded) => {
+      if (err) return res.status(403).json({ message: "Invalid or expired refresh token" });
+
+      const foundAdmin = await admin.findById(decoded.id);
+      if (!foundAdmin) {
+        return res.status(403).json({ message: "Refresh token not found or already invalidated" });
+      }
+
+      // Generate new access token
+      const newAccessToken = await generateAccessTokenAdmin(foundAdmin);
+
+      return res.json({ accessToken: newAccessToken });
+    });
+  } catch (error) {
+    console.error("Refresh Token Error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 
 // ------------------- CREATE ADMIN -------------------
@@ -217,6 +272,10 @@ export const getAllUsers = async (req: Request, res: Response) => {
 
 
 export const getUserStats = async (req: Request, res: Response) => {
+  const refreshToken = req.cookies.refreshToken; // Access the cookie
+  console.log(refreshToken)
+  console.log("Cookies received:", req.cookies); // Log all cookies
+
   try {
     const stats = await User.aggregate([
       {
@@ -425,7 +484,6 @@ export const updateDriver = async (req: any, res: Response) => {
   }
 }
 
-
 export const getDriverApprovalHistory = async (req: Request, res: Response) => {
   try {
     const { id } = req.params; // driverId
@@ -458,6 +516,7 @@ export const getDriverApprovalHistory = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
 export const getDriverWallet = async (req: Request, res: Response) => {
   try {
     const { id } = req.params
@@ -491,6 +550,8 @@ export const getDriverWallet = async (req: Request, res: Response) => {
     });
   }
 };
+
+
 
 //Get all Admins
 export const getAllAdmins = async (req: Request, res: Response) => {
@@ -692,5 +753,140 @@ export const deactivateAdmin = async (req: any, res: Response) => {
   } catch (error) {
     console.error("Error deactivating admin:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Transactions
+
+export const getAllTransactions = async (req: Request, res: Response) => {
+  try {
+    const transactions = await Transaction.find()
+      .sort({ actionOn: -1 })
+      .populate({
+        path: "driverId",        // the field in your Transaction schema
+        // select: "name email phone_number vehicle_type registration_number", // fields you want to include
+      });
+
+    if (!transactions || transactions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No transactions found",
+        data: [],
+      });
+    }
+
+    console.log(transactions)
+
+    res.status(200).json({
+      success: true,
+      data: transactions,
+    });
+  } catch (err) {
+    console.error("Get All Transactions Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getTransactionsInfo = async (req: Request, res: Response) => {
+  try {
+    // 1️⃣ All-time totals
+    const allTimeStats = await Transaction.aggregate([
+      { $match: { status: "success" } },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$netAmount" },
+          totalTransactions: { $sum: 1 },
+        },
+      },
+    ]);
+    const allTime = allTimeStats[0] || { totalRevenue: 0, totalTransactions: 0 };
+
+    // 2️⃣ This month
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    // This month totals
+    const thisMonthStats = await Transaction.aggregate([
+      { $match: { status: "success", actionOn: { $gte: thisMonthStart, $lte: now } } },
+      {
+        $group: {
+          _id: null,
+          revenueThisMonth: { $sum: "$netAmount" },
+          transactionsThisMonth: { $sum: 1 },
+        },
+      },
+    ]);
+    const thisMonth = thisMonthStats[0] || { revenueThisMonth: 0, transactionsThisMonth: 0 };
+
+    // Last month totals
+    const lastMonthStats = await Transaction.aggregate([
+      { $match: { status: "success", actionOn: { $gte: lastMonthStart, $lte: lastMonthEnd } } },
+      {
+        $group: {
+          _id: null,
+          revenueLastMonth: { $sum: "$netAmount" },
+          transactionsLastMonth: { $sum: 1 },
+        },
+      },
+    ]);
+    const lastMonth = lastMonthStats[0] || { revenueLastMonth: 0, transactionsLastMonth: 0 };
+
+    // Calculate % changes for this month vs last month
+    const revenueChange = lastMonth.revenueLastMonth
+      ? ((thisMonth.revenueThisMonth - lastMonth.revenueLastMonth) / lastMonth.revenueLastMonth) * 100
+      : 0;
+
+    const transactionsChange = lastMonth.transactionsLastMonth
+      ? ((thisMonth.transactionsThisMonth - lastMonth.transactionsLastMonth) / lastMonth.transactionsLastMonth) * 100
+      : 0;
+
+    res.status(200).json({
+      totalRevenue: allTime.totalRevenue,
+      totalTransactions: allTime.totalTransactions,
+      revenueThisMonth: thisMonth.revenueThisMonth,
+      transactionsThisMonth: thisMonth.transactionsThisMonth,
+      revenueLastMonth: lastMonth.revenueLastMonth,
+      transactionsLastMonth: lastMonth.transactionsLastMonth,
+      revenueChange,
+      transactionsChange,
+    });
+  } catch (err) {
+    console.error("Dashboard Transactions Info Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Rides
+export const getRides = async (req: Request, res: Response) => {
+  try {
+    const rides = await Ride.find()
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "driverId",       
+      })
+      .populate({
+        path:"userId"
+      });
+
+    if (!rides || rides.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No rides found",
+        data: [],
+      });
+    }
+
+    console.log(rides)
+
+    res.status(200).json({
+      success: true,
+      data: rides,
+    });
+  } catch (err) {
+    console.error("Get All Rides Error:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 };

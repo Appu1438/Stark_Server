@@ -1,5 +1,5 @@
 import Razorpay from "razorpay";
-import { driver, DriverWallet, DriverWalletHistory, Transaction } from "../db/schema";
+import { driver, DriverWallet, Transaction } from "../db/schema";
 import { Request, Response } from "express";
 
 const razorpay = new Razorpay({
@@ -54,7 +54,16 @@ export const verifyPayment = async (req: Request, res: Response) => {
     const orderDetails = await razorpay.orders.fetch(razorpay_order_id);
 
     const driverId = orderDetails.notes.driverId;
-    const amount = orderDetails.amount / 100; // Convert to INR
+
+    // Gross amount paid by the user (INR)
+    const grossAmount = orderDetails.amount / 100;
+
+    // Calculate net amount (wallet credit) after 2% Razorpay fee + 18% GST on fee
+    // Formula: net = gross / (1 + fee% * (1 + GST%))
+    const netAmount = parseFloat((grossAmount / (1 + 0.02 * (1 + 0.18))).toFixed(2));
+
+    console.log(grossAmount)
+    console.log(netAmount)
 
     // ✅ Create transaction record (optional, if you want to track all gateway transactions)
 
@@ -64,7 +73,7 @@ export const verifyPayment = async (req: Request, res: Response) => {
         {
           $set: {
             // Increment balance
-            balance: { $add: ["$balance", amount] },
+            balance: { $add: ["$balance", netAmount] },
             // Append history entry with balanceAfter
             history: {
               $concatArrays: [
@@ -73,10 +82,10 @@ export const verifyPayment = async (req: Request, res: Response) => {
                   {
                     type: "credit",
                     action: "recharge",
-                    amount,
+                    amount: netAmount,
                     referenceId: razorpay_order_id,
-                    meta: { razorpay_payment_id },
-                    balanceAfter: { $add: ["$balance", amount] },
+                    meta: { razorpay_payment_id, grossAmount },
+                    balanceAfter: { $add: ["$balance", netAmount] },
                     actionOn: new Date(),
                   },
                 ],
@@ -89,7 +98,8 @@ export const verifyPayment = async (req: Request, res: Response) => {
     );
     await Transaction.create({
       driverId,
-      amount,
+      grossAmount,
+      netAmount,
       paymentId: razorpay_order_id,
       status: "success",
       details: { razorpay_payment_id, razorpay_signature },

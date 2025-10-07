@@ -1,15 +1,19 @@
 import express from "express";
 import { v4 as uuid } from "uuid";
+import { isAuthenticatedDriver } from "../middleware/isAuthenticated";
+import { generateAccessToken } from "../utils/generateToken";
 
 const sessionRouter = express.Router();
 let sessionStore = {}; // Ideally use Redis for production
 
 const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes in ms
 
-sessionRouter.post("/", (req, res) => {
+sessionRouter.post("/", isAuthenticatedDriver, (req, res) => {
+  const token = generateAccessToken(req.body.driverId)
   const sessionId = uuid();
+  // console.log(sessionId)
   sessionStore[sessionId] = {
-    token: req.body.token,
+    token: token,
     driverId: req.body.driverId,
     name: req.body.name,
     email: req.body.email,
@@ -22,6 +26,7 @@ sessionRouter.post("/", (req, res) => {
 });
 
 sessionRouter.get("/:id", (req, res) => {
+  // console.log(req.params.id)
   const session = sessionStore[req.params.id];
   if (!session) {
     console.log('Session Expired', sessionStore[req.params.id])
@@ -40,7 +45,7 @@ sessionRouter.get("/:id", (req, res) => {
 });
 
 // ✅ Clear Session manually
-sessionRouter.delete("/:id", (req, res) => {
+sessionRouter.delete("/:id", isAuthenticatedDriver, (req, res) => {
   if (sessionStore[req.params.id]) {
     console.log('Session Deleted', sessionStore[req.params.id])
 

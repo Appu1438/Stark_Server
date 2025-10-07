@@ -1,6 +1,5 @@
 import { NextFunction, Response } from "express";
 import jwt from "jsonwebtoken";
-import prisma from "../utils/prisma";
 import { admin, driver, User } from "../db/schema";
 
 export const isAuthenticated = (
@@ -21,6 +20,8 @@ export const isAuthenticated = (
       return res.status(401).json({ message: "Token missing" });
     }
 
+    // console.log('Access Token ', token)
+
     // Verify the token
     jwt.verify(
       token,
@@ -31,6 +32,7 @@ export const isAuthenticated = (
         }
 
         const userData = await User.findById(decoded.id);
+        // console.log(decoded , userData)
         // Attach the user data to the request object
         req.user = userData;
         next();
@@ -58,6 +60,8 @@ export const isAuthenticatedDriver = (
     if (!token) {
       return res.status(401).json({ message: "Token missing" });
     }
+
+    // console.log('Access Token ', token)
 
     // Verify the token
     jwt.verify(
@@ -111,37 +115,4 @@ export const isAuthenticatedAdmin = (req: any, res: Response, next: NextFunction
   }
 };
 
-export const isActiveAdmin = (req: any, res: Response, next: NextFunction) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ message: "Please log in as admin to access this content!" });
-    }
 
-    const token = authHeader.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ message: "Token missing" });
-    }
-
-    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET!, async (err: any, decoded: any) => {
-      if (err) {
-        return res.status(401).json({ message: "Invalid token" });
-      }
-
-      const adminData = await admin.findById(decoded.id).select("-password");
-      if (!adminData) {
-        return res.status(401).json({ message: "Admin not found" });
-      }
-
-      if (!adminData.status || adminData.status.toLowerCase() !== "active") {
-        return res.status(401).json({ message: "Admin account is not active" });
-      }
-
-      req.admin = adminData;
-      next();
-    });
-  } catch (error) {
-    console.error("Admin auth error:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};

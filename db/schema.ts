@@ -86,6 +86,14 @@ const driverSchema = new Schema({
   dob: Date,
   gender: { type: String, enum: ["Male", "Female", "Other"] },
 
+  notificationToken: String,
+  activeDevice: {
+    fingerprint: { type: String, default: null },
+    brand: { type: String, default: null },
+    model: { type: String, default: null },
+    osName: { type: String, default: null },
+    osBuildId: { type: String, default: null },
+  },
   vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv"] },
   registration_number: { type: String, unique: true },
   registration_date: Date,
@@ -96,16 +104,15 @@ const driverSchema = new Schema({
   insurance_number: String,
   insurance_expiry: Date,
 
-  baseFare: { type: Number, default: 0 },
-  perKmRate: { type: Number, default: 0 },
-  perMinRate: { type: Number, default: 0 },
-  minFare: { type: Number, default: 0 },
+  // baseFare: { type: Number, default: 0 },
+  // perKmRate: { type: Number, default: 0 },
+  // perMinRate: { type: Number, default: 0 },
+  // minFare: { type: Number, default: 0 },
 
   status: { type: String, default: "inactive", enum: ["active", "inactive"] },
   is_approved: { type: Boolean, default: false },
 
   ratings: { type: Number, default: 0 },
-  // wallet: { type: Number, default: 0 },
   totalEarning: { type: Number, default: 0 },
   totalShare: { type: Number, default: 0 },
   totalRides: { type: Number, default: 0 },
@@ -123,9 +130,25 @@ const rideSchema = new Schema({
   platformShare: Number,
   currentLocationName: String,
   destinationLocationName: String,
+
+  currentLocation: {
+    name: String,
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
+  },
+
+  destinationLocation: {
+    name: String,
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
+  },
+
   distance: String,
   status: String,
   rating: Number,
+
+  // pickupTime: { type: Date, required: false }, // optional, can be set for future rides
+
 }, { timestamps: true });
 
 const userSchema = new Schema({
@@ -140,7 +163,8 @@ const userSchema = new Schema({
 const transactionSchema = new Schema(
   {
     driverId: { type: Schema.Types.ObjectId, ref: "driver", required: true },
-    amount: { type: Number, required: true },
+    grossAmount: { type: Number, required: true },
+    netAmount: { type: Number, required: true },
     paymentId: { type: String }, // Stripe PaymentIntent ID
     status: { type: String, enum: ["pending", "success", "failed"], default: "pending" },
     details: { type: Object }, // store raw stripe response if needed
@@ -180,6 +204,21 @@ const driverWalletSchema = new Schema(
   },
   { timestamps: true }
 );
+
+const fareSchema = new Schema({
+  vehicle_type: { type: String, enum: ["Auto", "Hatchback", "Sedan", "Suv"], required: true },
+  baseFare: { type: Number, default: 0 },
+  perKmRate: { type: Number, default: 0 },
+  perMinRate: { type: Number, default: 0 },
+  minFare: { type: Number, default: 0 },
+  surgeMultiplier: { type: Number, default: 1 }, // optional: for dynamic pricing
+
+  district: { type: String, default: 'Default' }, // mark if this fare set is active
+}, { timestamps: true });
+
+
+
+export const Fare = mongoose.model("Fare", fareSchema);
 
 export const DriverWallet = mongoose.model("driver_wallet", driverWalletSchema);
 

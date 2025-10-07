@@ -5,10 +5,11 @@ import userRouter from "./routes/user.route";
 import driverRouter from "./routes/driver.route";
 import Nylas from "nylas";
 import adminRouter from "./routes/admin.route";
-import cors from "cors"; // <-- import cors
+import cors from "cors";
 import paymentRouter from "./routes/payment.route";
 const connectDB = require("./db/connect");
 import sessionRouter from "./routes/session.route";
+import fareRouter from "./routes/fare.route";
 
 export const app = express();
 
@@ -24,17 +25,20 @@ app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
 // enable cors
-app.use(
-  cors({
-    origin: '*',
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    credentials: true, // allow cookies/auth headers
-  })
-);
+app.use(cors({
+  origin: [
+    "http://192.168.1.5:4000",
+    "http://192.168.1.5:5000",
+    "http://192.168.1.5:8081",
+    "http://192.168.1.5:8082"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  credentials: true, // ✅ required for cookies
+}));
+
 
 // connect to DB
 connectDB();
-
 
 
 // routes
@@ -43,6 +47,7 @@ app.use("/api/v1/driver", driverRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/session", sessionRouter);
+app.use("/api/v1/fare", fareRouter);
 
 // testing api
 app.get("/test", (req: Request, res: Response, next: NextFunction) => {

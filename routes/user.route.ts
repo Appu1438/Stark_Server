@@ -1,7 +1,11 @@
 import express from "express";
 import {
+  calculateFare,
+  findRideById,
   getAllRides,
   getLoggedInUserData,
+  logout,
+  refreshToken,
   registerUser,
   sendingOtpToEmail,
   updateUserPushToken,
@@ -13,6 +17,10 @@ import { isAuthenticated } from "../middleware/isAuthenticated";
 const userRouter = express.Router();
 
 userRouter.post("/registration", registerUser);
+
+userRouter.post("/logout", logout);
+
+userRouter.post("/refresh-token", refreshToken);
 
 userRouter.post("/verify-otp", verifyOtp);
 
@@ -26,5 +34,8 @@ userRouter.put("/update-push-token", isAuthenticated, updateUserPushToken);
 
 
 userRouter.get("/get-rides", isAuthenticated, getAllRides);
+
+userRouter.get("/ride/:id", isAuthenticated, findRideById);
+
 
 export default userRouter;
