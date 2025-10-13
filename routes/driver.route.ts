@@ -16,6 +16,7 @@ import {
   verifyingEmailOtp,
   verifyPhoneOtpForLogin,
   verifyPhoneOtpForRegistration,
+  verifyRideOtp,
 } from "../controllers/driver.controller";
 import { isAuthenticatedDriver } from "../middleware/isAuthenticated";
 import { checkDriverDevice } from "../middleware/checkDevice";
@@ -45,6 +46,8 @@ driverRouter.put("/update-status", isAuthenticatedDriver, checkDriverDevice, upd
 driverRouter.put("/update-push-token", isAuthenticatedDriver, checkDriverDevice, updateDriverPushToken);
 
 driverRouter.post("/new-ride", isAuthenticatedDriver, checkDriverDevice, newRide);
+
+driverRouter.post("/verify-ride-otp", isAuthenticatedDriver, checkDriverDevice, verifyRideOtp);
 
 driverRouter.put(
   "/update-ride-status",

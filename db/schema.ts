@@ -122,34 +122,40 @@ const driverSchema = new Schema({
 }, { timestamps: true });
 
 
-const rideSchema = new Schema({
-  userId: { type: Schema.Types.ObjectId, ref: "user" },
-  driverId: { type: Schema.Types.ObjectId, ref: "driver" },
-  totalFare: Number,
-  driverEarnings: Number,
-  platformShare: Number,
-  currentLocationName: String,
-  destinationLocationName: String,
+const rideSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "user" },
+    driverId: { type: Schema.Types.ObjectId, ref: "driver" },
+    totalFare: Number,
+    driverEarnings: Number,
+    platformShare: Number,
+    currentLocationName: String,
+    destinationLocationName: String,
 
-  currentLocation: {
-    name: String,
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
+    currentLocation: {
+      name: String,
+      latitude: { type: Number, required: true },
+      longitude: { type: Number, required: true },
+    },
+
+    destinationLocation: {
+      name: String,
+      latitude: { type: Number, required: true },
+      longitude: { type: Number, required: true },
+    },
+
+    distance: String,
+    status: {
+      type: String,
+      enum: ["Booked", "Processing", "Arrived", "Ongoing", "Reached", "Completed"],
+      default: "Booked",
+    },
+
+    rating: Number,
+    otp: { type: Number, required: false }, // made optional on creation
   },
-
-  destinationLocation: {
-    name: String,
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
-  },
-
-  distance: String,
-  status: String,
-  rating: Number,
-
-  // pickupTime: { type: Date, required: false }, // optional, can be set for future rides
-
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 const userSchema = new Schema({
   name: String,
