@@ -294,6 +294,8 @@ export const getAllRides = async (req: any, res: Response) => {
 
 export const findRideById = async (req: Request, res: Response) => {
   const { id } = req.params;
+  console.log('user', id)
+
 
   try {
     const ride = await Ride.findById(id)

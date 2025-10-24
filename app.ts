@@ -10,6 +10,7 @@ import paymentRouter from "./routes/payment.route";
 const connectDB = require("./db/connect");
 import sessionRouter from "./routes/session.route";
 import fareRouter from "./routes/fare.route";
+import rideRouter from "./routes/ride.route";
 
 export const app = express();
 
@@ -48,6 +49,7 @@ app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/session", sessionRouter);
 app.use("/api/v1/fare", fareRouter);
+app.use("/api/v1/ride", rideRouter);
 
 // testing api
 app.get("/test", (req: Request, res: Response, next: NextFunction) => {

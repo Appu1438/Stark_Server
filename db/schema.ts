@@ -104,11 +104,6 @@ const driverSchema = new Schema({
   insurance_number: String,
   insurance_expiry: Date,
 
-  // baseFare: { type: Number, default: 0 },
-  // perKmRate: { type: Number, default: 0 },
-  // perMinRate: { type: Number, default: 0 },
-  // minFare: { type: Number, default: 0 },
-
   status: { type: String, default: "inactive", enum: ["active", "inactive"] },
   is_approved: { type: Boolean, default: false },
 
@@ -147,12 +142,30 @@ const rideSchema = new Schema(
     distance: String,
     status: {
       type: String,
-      enum: ["Booked", "Processing", "Arrived", "Ongoing", "Reached", "Completed"],
+      enum: ["Booked", "Processing", "Arrived", "Ongoing", "Reached", "Completed", "Cancelled", "Cancelled-Midway"],
       default: "Booked",
     },
 
     rating: Number,
     otp: { type: Number, required: false }, // made optional on creation
+
+    cancelDetails: {
+      cancelledBy: { type: String, enum: ["user", "driver", "system"], default: null },
+      reason: { type: String, default: null },
+      totalFare: Number,
+      driverEarnings: Number,
+      platformShare: Number,
+      refundedAmount: Number,
+      travelledDistance: { type: Number, default: 0 },
+      cancelledLocationName: String,
+      cancelledLocation: {
+        name: String,
+        latitude: { type: Number },
+        longitude: { type: Number },
+      },
+      cancelledAt: { type: Date, default: null },
+    },
+
   },
   { timestamps: true }
 );

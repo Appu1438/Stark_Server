@@ -4,22 +4,19 @@ import {
   getAllRides,
   getDriversById,
   getDriverWallet,
-  getFareByVehicleType,
   getLoggedInDriverData,
   logoutDriver,
-  newRide,
   refreshTokenDriver,
   sendingOtpToPhone,
   updateDriverPushToken,
   updateDriverStatus,
-  updatingRideStatus,
   verifyingEmailOtp,
   verifyPhoneOtpForLogin,
   verifyPhoneOtpForRegistration,
-  verifyRideOtp,
 } from "../controllers/driver.controller";
 import { isAuthenticatedDriver } from "../middleware/isAuthenticated";
 import { checkDriverDevice } from "../middleware/checkDevice";
+import { checkDriverApproval } from "../middleware/checkDriverApproval";
 
 const driverRouter = express.Router();
 
@@ -35,30 +32,20 @@ driverRouter.post("/verify-otp", verifyPhoneOtpForRegistration);
 
 driverRouter.post("/registration-driver", verifyingEmailOtp);
 
-driverRouter.get("/me", isAuthenticatedDriver, checkDriverDevice, getLoggedInDriverData);
+driverRouter.get("/me", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getLoggedInDriverData);
 
-driverRouter.get("/wallet", isAuthenticatedDriver, checkDriverDevice, getDriverWallet);
+driverRouter.get("/wallet", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getDriverWallet);
 
 driverRouter.get("/get-drivers-data", getDriversById);
 
-driverRouter.put("/update-status", isAuthenticatedDriver, checkDriverDevice, updateDriverStatus);
+driverRouter.put("/update-status", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, updateDriverStatus);
 
-driverRouter.put("/update-push-token", isAuthenticatedDriver, checkDriverDevice, updateDriverPushToken);
+driverRouter.put("/update-push-token", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, updateDriverPushToken);
 
-driverRouter.post("/new-ride", isAuthenticatedDriver, checkDriverDevice, newRide);
 
-driverRouter.post("/verify-ride-otp", isAuthenticatedDriver, checkDriverDevice, verifyRideOtp);
+driverRouter.get("/ride/:id", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, findRideById);
 
-driverRouter.put(
-  "/update-ride-status",
-  isAuthenticatedDriver,
-  checkDriverDevice,
-  updatingRideStatus
-);
-
-driverRouter.get("/ride/:id", isAuthenticatedDriver, checkDriverDevice, findRideById);
-
-driverRouter.get("/get-rides", isAuthenticatedDriver, checkDriverDevice, getAllRides);
+driverRouter.get("/get-rides", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getAllRides);
 
 
 export default driverRouter;

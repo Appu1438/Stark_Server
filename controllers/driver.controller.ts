@@ -541,24 +541,33 @@ export const updateDriverStatus = async (req: any, res: Response) => {
     try {
         const { status } = req.body;
 
-        console.log(status);
-
-        let Driver = await driver.findByIdAndUpdate(
-            req.driver.id,
-            { status },
-            { new: true }
-        );
-
+        // Check if driver exists
+        const Driver = await driver.findById(req.driver.id);
         if (!Driver) {
             return res.status(404).json({ success: false, message: "Driver not found" });
         }
 
-        // Convert Mongoose doc to plain object
-        const driverObj = Driver.toObject();
+        // 🚫 Prevent status change during active rides
+        const activeRide = await Ride.findOne({
+            driverId: req.driver.id,
+            status: { $in: ["Processing", "Arrived", "Ongoing", "Reached"] },
+        });
 
-        // Remap _id → id
+        if (activeRide) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot change your status while on an active ride.",
+            });
+        }
+
+        // ✅ Proceed to update status
+        Driver.status = status;
+        await Driver.save();
+
+        // Clean response
+        const driverObj = Driver.toObject();
         driverObj.id = driverObj._id;
-        delete driverObj?._id;
+        delete driverObj._id;
         delete driverObj.__v;
 
         res.status(200).json({ success: true, driver: driverObj });
@@ -622,260 +631,10 @@ export const getDriversById = async (req: Request, res: Response) => {
 
 
 
-export const newRide = async (req: Request, res: Response) => {
-    try {
-        const {
-            userId,
-            totalFare,
-            driverEarnings,
-            platformShare,
-            status,
-            currentLocationName,
-            currentLocation,
-            destinationLocationName,
-            destinationLocation,
-            distance,
-        } = req.body;
-
-        const driverId = req.driver.id;
-
-        const updatedWallet = await DriverWallet.findOneAndUpdate(
-            {
-                driverId,
-                balance: { $gt: 0 },
-            },
-            [
-                {
-                    $set: {
-                        balance: { $subtract: ["$balance", platformShare] },
-                        history: {
-                            $concatArrays: [
-                                "$history",
-                                [
-                                    {
-                                        type: "debit",
-                                        action: "platform_fee",
-                                        amount: platformShare,
-                                        referenceId: null,
-                                        meta: { rideDetails: { totalFare, distance, userId } },
-                                        balanceAfter: { $subtract: ["$balance", platformShare] },
-                                        actionOn: new Date(),
-                                    },
-                                ],
-                            ],
-                        },
-                    },
-                },
-            ],
-            { new: true }
-        );
-
-        if (!updatedWallet) {
-            return res
-                .status(400)
-                .json({ message: "Insufficient wallet balance to start the ride" });
-        }
-
-        // ✅ Generate OTP
-        const otp = await generateOtp();
-
-        // ✅ Create the ride
-        const newRide = new Ride({
-            userId,
-            driverId,
-            totalFare: parseFloat(totalFare),
-            driverEarnings: parseFloat(driverEarnings),
-            platformShare: parseFloat(platformShare),
-            status,
-            currentLocationName,
-            currentLocation,
-            destinationLocationName,
-            destinationLocation,
-            distance,
-            otp,
-        });
-
-        await newRide.save();
-
-        // ✅ Update wallet history with rideId reference
-        await DriverWallet.updateOne(
-            { driverId },
-            {
-                $set: {
-                    "history.$[elem].referenceId": newRide._id,
-                },
-            },
-            { arrayFilters: [{ "elem.action": "platform_fee", "elem.referenceId": null }] }
-        );
-
-        await driver.findByIdAndUpdate(driverId, {
-            $inc: { pendingRides: 1 },
-        });
-
-        res.status(201).json({
-            success: true,
-            newRide: {
-                id: newRide._id,
-                userId: newRide.userId,
-                driverId: newRide.driverId,
-                totalFare: newRide.totalFare,
-                driverEarnings: newRide.driverEarnings,
-                platformShare: newRide.platformShare,
-                status: newRide.status,
-                otp: newRide.otp, // include OTP in response (optional)
-                currentLocationName: newRide.currentLocationName,
-                destinationLocationName: newRide.destinationLocationName,
-                distance: newRide.distance,
-                createdAt: newRide.createdAt,
-                updatedAt: newRide.updatedAt,
-            },
-            walletBalance: updatedWallet.balance,
-        });
-    } catch (error) {
-        console.error("New Ride Error:", error);
-        res.status(500).json({ message: "Internal server error", error });
-    }
-};
-
-export const verifyRideOtp = async (req: Request, res: Response) => {
-    try {
-        const { rideId, otp } = req.body;
-
-        if (!rideId || !otp) {
-            return res.status(400).json({ message: "rideId and otp are required" });
-        }
-
-        // Find the ride
-        const ride = await Ride.findById(rideId);
-        if (!ride) {
-            return res.status(404).json({ message: "Ride not found" });
-        }
-
-        // Check if ride already started
-        if (ride.status === "Ongoing") {
-            return res.status(400).json({ message: "Ride is already started" });
-        }
-
-        // Verify OTP
-        if (ride.otp !== parseInt(otp)) {
-            return res.status(400).json({ message: "Invalid OTP" });
-        }
-
-        // Update status to Ongoing
-        ride.status = "Ongoing";
-        await ride.save();
-
-        res.status(200).json({
-            success: true,
-            message: "OTP verified successfully. Ride started!",
-            updatedRide: ride,
-        });
-    } catch (error) {
-        console.error("OTP Verification Error:", error);
-        res.status(500).json({ message: "Internal server error", error });
-    }
-};
-
-
-// updating ride status
-export const updatingRideStatus = async (req: any, res: Response) => {
-    try {
-        const { rideId, rideStatus, driverLocation } = req.body;
-        console.log(req.body)
-
-        if (!rideId || !rideStatus) {
-            return res.status(400).json({ success: false, message: "Invalid input data" });
-        }
-
-        const driverId = req.driver?.id;
-        if (!driverId) {
-            return res.status(401).json({ success: false, message: "Unauthorized" });
-        }
-
-        const ride = await Ride.findById(rideId);
-
-        if (!ride) {
-            return res.status(404).json({ success: false, message: "Ride not found" });
-        }
-
-        // Check for proximity before updating status
-        if (rideStatus === "Arrived") {
-            const distanceToPickup = calculateDistance(
-                driverLocation.latitude,
-                driverLocation.longitude,
-                ride?.currentLocation?.latitude,
-                ride?.currentLocation?.longitude
-            );
-
-            if (distanceToPickup > 1) {
-                return res.status(400).json({
-                    message: "You must be within 1 km of the pickup location to mark as Arrived",
-                });
-            }
-        }
-
-        if (rideStatus === "Reached") {
-            const distanceToDrop = calculateDistance(
-                driverLocation.latitude,
-                driverLocation.longitude,
-                ride?.destinationLocation?.latitude,
-                ride?.destinationLocation?.longitude
-            );
-
-            if (distanceToDrop > 1) {
-                return res.status(400).json({
-                    message: "You must be within 1 km of the destination to mark as Reached",
-                });
-            }
-        }
-
-        ride.status = rideStatus;
-        await ride.save();
-
-        if (rideStatus === "Completed") {
-            await driver.updateOne(
-                { _id: driverId },
-                [
-                    {
-                        $set: {
-                            pendingRides: {
-                                $cond: [{ $gt: ["$pendingRides", 0] }, { $subtract: ["$pendingRides", 1] }, 0]
-                            },
-                            totalEarning: { $add: ["$totalEarning", ride.totalFare] },
-                            totalRides: { $add: ["$totalRides", 1] },
-                            totalShare: { $add: ["$totalShare", ride.platformShare] },
-                        }
-                    }
-                ]
-            );
-
-        }
-
-        res.status(201).json({
-            success: true,
-            updatedRide: {
-                id: ride._id, // map _id to id
-                userId: ride.userId,
-                driverId: ride.driverId,
-                totalFare: ride.totalFare,
-                driverEarnings: ride.driverEarnings,
-                platformShare: ride.platformShare,
-                status: ride.status,
-                currentLocationName: ride.currentLocationName,
-                destinationLocationName: ride.destinationLocationName,
-                distance: ride.distance,
-                createdAt: ride.createdAt,
-                updatedAt: ride.updatedAt,
-            },
-        });
-    } catch (error: any) {
-        res.status(400).json({ success: false, message: error.message });
-    }
-};
-
 //find ride by Id
 export const findRideById = async (req: Request, res: Response) => {
     const { id } = req.params;
+    console.log('driver', id)
 
     try {
         const ride = await Ride.findById(id)
@@ -888,6 +647,8 @@ export const findRideById = async (req: Request, res: Response) => {
 
         const { _id, ...rest } = ride.toObject();
         const formattedRide = { id: _id, ...rest };
+
+        console.log(formattedRide)
 
         res.status(200).json({ success: true, ride: formattedRide });
     } catch (error) {

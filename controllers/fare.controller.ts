@@ -4,7 +4,7 @@ import { Fare } from "../db/schema";
 export const calculateFare = async (req: Request, res: Response) => {
   try {
     console.log(req.body)
-    const { vehicle_type, distance, duration, toll = 0, platformFee = 0, district } = req.body;
+    const { vehicle_type, distance, district } = req.body;
 
     if (!vehicle_type || !distance) {
       return res.status(400).json({ message: "Vehicle type and distance are required" });
@@ -24,11 +24,10 @@ export const calculateFare = async (req: Request, res: Response) => {
     const rawFare =
       fare.baseFare +
       distance * fare.perKmRate
-    //  +
-    // duration * fare.perMinRate;
+
 
     const surgedFare = rawFare * fare.surgeMultiplier;
-    const totalFare = Math.max(surgedFare + toll + platformFee, fare.minFare);
+    const totalFare = Math.max(surgedFare, fare.minFare);
 
     const roundedFare = Math.round(totalFare);
 
