@@ -107,7 +107,9 @@ const driverSchema = new Schema({
   status: { type: String, default: "inactive", enum: ["active", "inactive"] },
   is_approved: { type: Boolean, default: false },
 
-  ratings: { type: Number, default: 0 },
+  ratings: { type: Number, default: 0 }, // average rating
+  totalRatings: { type: Number, default: 0 }, // number of ratings received
+
   totalEarning: { type: Number, default: 0 },
   totalShare: { type: Number, default: 0 },
   totalRides: { type: Number, default: 0 },
@@ -147,6 +149,9 @@ const rideSchema = new Schema(
     },
 
     rating: Number,
+    driverRating: Number,
+    userRating: Number,
+
     otp: { type: Number, required: false }, // made optional on creation
 
     cancelDetails: {
@@ -175,8 +180,15 @@ const userSchema = new Schema({
   phone_number: { type: String, unique: true },
   email: { type: String, unique: true },
   notificationToken: String,
+
+  is_approved: { type: Boolean, default: true },
+
+  totalRatings: { type: Number, default: 0 },
   ratings: { type: Number, default: 0 },
+
   totalRides: { type: Number, default: 0 },
+  pendingRides: { type: Number, default: 0 },
+  cancelRides: { type: Number, default: 0 },
 }, { timestamps: true });
 
 const transactionSchema = new Schema(
@@ -236,6 +248,85 @@ const fareSchema = new Schema({
 }, { timestamps: true });
 
 
+
+const complaintSchema = new Schema(
+  {
+    // Who registered the complaint
+    registeredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: "userType", // Dynamic reference (User or Driver)
+      required: true,
+    },
+
+    // Determines whether it's a User or Driver
+    userType: {
+      type: String,
+      enum: ["User", "Driver"],
+      required: true,
+    },
+
+    // Optional: Link the complaint to a ride if relevant
+    ride: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ride",
+      default: null,
+    },
+
+    // Type of issue
+    category: {
+      type: String,
+      enum: [
+        "Ride Issue",
+        "Payment Issue",
+        "Driver Behavior",
+        "Customer Behavior",
+        "App Issue",
+        "Other",
+      ],
+      required: true,
+    },
+
+    // User’s complaint message
+    message: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    // Complaint status
+    status: {
+      type: String,
+      enum: ["Pending", "In Review", "Resolved", "Rejected"],
+      default: "Pending",
+    },
+
+    // Optional: Admin response or resolution note
+    adminResponse: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    adminHandledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "admin",
+      default: null,
+    },
+    priority: {
+      type: String,
+      enum: ["Low", "Medium", "High"],
+      default: "Medium",
+    },
+    // Optional: date when resolved
+    resolvedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { timestamps: true } // adds createdAt and updatedAt
+);
+
+
+export const Complaint = mongoose.model("Complaint", complaintSchema);
 
 export const Fare = mongoose.model("Fare", fareSchema);
 

@@ -2,9 +2,11 @@ require("dotenv").config();
 import { NextFunction, Request, Response } from "express";
 import twilio from "twilio";
 import jwt from "jsonwebtoken";
-import { generateAccessToken, generateRefreshToken, sendToken } from "../utils/generateToken";
+import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
 import { nylas } from "../app";
 import { driver, DriverWallet, Fare, Ride } from "../db/schema";
+import mongoose from "mongoose";
+
 import { generateOtp } from "../utils/generateOtp";
 import { calculateDistance } from "../utils/calculateDistance";
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -21,30 +23,47 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
  */
 export const refreshTokenDriver = async (req: Request, res: Response) => {
     try {
-        const refreshToken = req.cookies.refreshToken;
-        console.log('Refresh Token Driver ', refreshToken)
+        const refreshToken = req.cookies.driverRefreshToken;
+        console.log("🚘 [Driver Refresh] Step 1: Received refresh token:", refreshToken || "❌ No token found in cookies");
 
-        if (!refreshToken) return res.status(401).json({ message: "Refresh token required" });
+        // Check if refresh token exists
+        if (!refreshToken) {
+            console.log("🚫 [Driver Refresh] No refresh token found in cookies.");
+            return res.status(401).json({ message: "Refresh token required" });
+        }
 
-        // Verify token
-        jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded) => {
-            if (err) return res.status(403).json({ message: "Invalid or expired refresh token" });
+        // Verify the refresh token
+        console.log("🔍 [Driver Refresh] Step 2: Verifying refresh token...");
+        jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded: any) => {
+            if (err) {
+                console.log("🚫 [Driver Refresh] Token verification failed:", err.message);
+                return res.status(403).json({ message: "Invalid or expired refresh token" });
+            }
 
+            console.log("✅ [Driver Refresh] Step 3: Token verified successfully. Decoded payload:", decoded);
+
+            // Find the driver in DB
+            console.log("🔹 [Driver Refresh] Step 4: Searching driver with ID:", decoded.id);
             const Driver = await driver.findById(decoded.id);
+
             if (!Driver) {
+                console.log("🚫 [Driver Refresh] Step 5: Driver not found or token invalidated.");
                 return res.status(403).json({ message: "Refresh token not found or already invalidated" });
             }
 
-            // Generate new access token
+            // Generate a new access token
+            console.log("✅ [Driver Refresh] Step 6: Driver found. Generating new access token...");
             const newAccessToken = generateAccessToken(Driver._id);
 
+            console.log("✅ [Driver Refresh] Step 7: New access token generated successfully!");
             return res.json({ accessToken: newAccessToken });
         });
     } catch (error) {
-        console.error("Refresh Token Error:", error);
+        console.error("🔥 [Driver Refresh] Step 8: Unhandled error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
+
 
 /**
  * Logout Controller
@@ -95,7 +114,7 @@ export const logoutDriver = async (req: Request, res: Response) => {
         }
 
         // 3️⃣ Clear refresh token cookie
-        res.cookie("refreshToken", "", {
+        res.cookie("driverRefreshToken", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "strict",
@@ -212,7 +231,7 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
         const accessToken = generateAccessToken(Driver._id)
         const refreshToken = generateRefreshToken(Driver._id)
 
-        res.cookie("refreshToken", refreshToken, {
+        res.cookie("driverRefreshToken", refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production", // only over HTTPS in production
             sameSite: "strict",
@@ -669,4 +688,138 @@ export const getAllRides = async (req: any, res: Response) => {
     res.status(200).json({ success: true, rides: formattedRides });
 };
 
+export const getDriverEarnings = async (req: any, res: any) => {
+    try {
+        const driverId = req.driver?.id;
+        const { period } = req.query; // "daily" | "weekly" | "monthly"
 
+        if (!driverId) {
+            return res.status(400).json({ message: "Driver ID required" });
+        }
+
+        const objectId = new mongoose.Types.ObjectId(driverId);
+
+        // 🕓 Find driver's first completed ride
+        const firstRide = await Ride.findOne({
+            driverId: objectId,
+            status: "Completed",
+        })
+            .sort({ createdAt: 1 })
+            .limit(1);
+
+        if (!firstRide) {
+            return res.json({
+                message: "No rides found",
+                period,
+                totalEarnings: 0,
+                rideCount: 0,
+                chartData: [],
+            });
+        }
+
+        const firstRideDate = new Date(firstRide.createdAt);
+        const now = new Date();
+
+        let groupFormat: any;
+        let labels: string[] = [];
+
+        // ---------------- DAILY ----------------
+        if (period === "daily") {
+            groupFormat = { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } };
+            const current = new Date(firstRideDate);
+            while (current <= now) {
+                labels.push(current.toISOString().split("T")[0]);
+                current.setDate(current.getDate() + 1);
+            }
+
+            // ---------------- WEEKLY ----------------
+        } else if (period === "weekly") {
+            // ✅ Fix: No “W” prefix in group key, only add it later for chart
+            groupFormat = {
+                $concat: [
+                    { $toString: { $isoWeek: "$createdAt" } },
+                    "-",
+                    { $toString: { $year: "$createdAt" } },
+                ],
+            };
+
+            const start = new Date(firstRideDate);
+            const current = new Date(start);
+            while (current <= now) {
+                const week = getWeekNumber(current);
+                labels.push(`${week}-${current.getFullYear()}`); // ✅ Match Mongo format
+                current.setDate(current.getDate() + 7);
+            }
+
+            // ---------------- MONTHLY ----------------
+        } else if (period === "monthly") {
+            groupFormat = { $dateToString: { format: "%Y-%m", date: "$createdAt" } };
+            const start = new Date(firstRideDate);
+            const current = new Date(start);
+            while (current <= now) {
+                const label = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`;
+                labels.push(label);
+                current.setMonth(current.getMonth() + 1);
+            }
+
+        } else {
+            return res.status(400).json({ message: "Invalid period" });
+        }
+
+        // --- Aggregate earnings ---
+        const earnings = await Ride.aggregate([
+            {
+                $match: {
+                    driverId: objectId,
+                    status: "Completed",
+                    createdAt: { $gte: firstRideDate, $lte: now },
+                },
+            },
+            {
+                $group: {
+                    _id: groupFormat,
+                    totalEarnings: { $sum: "$driverEarnings" },
+                    rideCount: { $sum: 1 },
+                },
+            },
+            { $sort: { _id: 1 } },
+        ]);
+
+        // --- Map to dictionary ---
+        const earningsMap = new Map(earnings.map((e) => [e._id, e]));
+
+        // --- Build chart data ---
+        const chartData = labels.map((label) => ({
+            label:
+                period === "weekly"
+                    ? "W" + label // only add prefix for chart display
+                    : label,
+            totalEarnings: earningsMap.get(label)?.totalEarnings || 0,
+            rideCount: earningsMap.get(label)?.rideCount || 0,
+        }));
+
+        const totalEarnings = chartData.reduce((sum, e) => sum + e.totalEarnings, 0);
+        const rideCount = chartData.reduce((sum, e) => sum + e.rideCount, 0);
+
+        res.json({
+            period,
+            totalEarnings,
+            rideCount,
+            from: firstRideDate,
+            to: now,
+            chartData,
+        });
+    } catch (err) {
+        console.error("Error fetching earnings:", err);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+// Helper: ISO week number
+function getWeekNumber(d: Date) {
+    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}

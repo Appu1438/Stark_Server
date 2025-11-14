@@ -6,9 +6,11 @@ export const calculateFare = async (req: Request, res: Response) => {
     console.log(req.body)
     const { vehicle_type, distance, district } = req.body;
 
-    if (!vehicle_type || !distance) {
+    if (!vehicle_type || distance === undefined || distance === null) {
+      console.log("Vehicle type and distance are required");
       return res.status(400).json({ message: "Vehicle type and distance are required" });
     }
+
 
     // 1️⃣ Fetch fare details
     let fare = await Fare.findOne({ vehicle_type, district });

@@ -11,6 +11,7 @@ const connectDB = require("./db/connect");
 import sessionRouter from "./routes/session.route";
 import fareRouter from "./routes/fare.route";
 import rideRouter from "./routes/ride.route";
+import complaintRouter from "./routes/complaint.route";
 
 export const app = express();
 
@@ -28,10 +29,10 @@ app.use(cookieParser());
 // enable cors
 app.use(cors({
   origin: [
-    "http://192.168.1.5:4000",
-    "http://192.168.1.5:5000",
-    "http://192.168.1.5:8081",
-    "http://192.168.1.5:8082"
+    "http://192.168.1.2:3000",
+    "http://192.168.1.2:5000",
+    "http://192.168.1.2:8081",
+    "http://192.168.1.2:8082"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true, // ✅ required for cookies
@@ -50,6 +51,7 @@ app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/session", sessionRouter);
 app.use("/api/v1/fare", fareRouter);
 app.use("/api/v1/ride", rideRouter);
+app.use("/api/v1/complaints", complaintRouter);
 
 // testing api
 app.get("/test", (req: Request, res: Response, next: NextFunction) => {

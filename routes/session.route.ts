@@ -20,13 +20,13 @@ sessionRouter.post("/", isAuthenticatedDriver, (req, res) => {
     phone_number: req.body.phone_number,
     createdAt: Date.now(),
   };
-  console.log('Session Created', sessionStore[sessionId])
+  console.log('Session Created', sessionStore[sessionId], sessionId)
 
   res.json({ sessionId });
 });
 
 sessionRouter.get("/:id", (req, res) => {
-  // console.log(req.params.id)
+  console.log(req.params.id)
   const session = sessionStore[req.params.id];
   if (!session) {
     console.log('Session Expired', sessionStore[req.params.id])

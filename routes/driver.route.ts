@@ -2,6 +2,7 @@ import express from "express";
 import {
   findRideById,
   getAllRides,
+  getDriverEarnings,
   getDriversById,
   getDriverWallet,
   getLoggedInDriverData,
@@ -46,6 +47,8 @@ driverRouter.put("/update-push-token", isAuthenticatedDriver, checkDriverDevice,
 driverRouter.get("/ride/:id", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, findRideById);
 
 driverRouter.get("/get-rides", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getAllRides);
+
+driverRouter.get("/earnings", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getDriverEarnings);
 
 
 export default driverRouter;

@@ -13,6 +13,7 @@ import {
   verifyOtp,
 } from "../controllers/user.controller";
 import { isAuthenticated } from "../middleware/isAuthenticated";
+import { checkUserApproval } from "../middleware/checkUserApproval";
 
 const userRouter = express.Router();
 
@@ -28,14 +29,14 @@ userRouter.post("/email-otp-request", sendingOtpToEmail);
 
 userRouter.put("/email-otp-verify", verifyingEmail);
 
-userRouter.get("/me", isAuthenticated, getLoggedInUserData);
+userRouter.get("/me", isAuthenticated, checkUserApproval, getLoggedInUserData);
 
-userRouter.put("/update-push-token", isAuthenticated, updateUserPushToken);
+userRouter.put("/update-push-token", isAuthenticated, checkUserApproval, updateUserPushToken);
 
 
-userRouter.get("/get-rides", isAuthenticated, getAllRides);
+userRouter.get("/get-rides", isAuthenticated, checkUserApproval, getAllRides);
 
-userRouter.get("/ride/:id", isAuthenticated, findRideById);
+userRouter.get("/ride/:id", isAuthenticated, checkUserApproval, findRideById);
 
 
 export default userRouter;

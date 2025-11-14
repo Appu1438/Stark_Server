@@ -3,7 +3,7 @@ import { NextFunction, Request, Response } from "express";
 import twilio from "twilio";
 import jwt from "jsonwebtoken";
 import { nylas } from "../app";
-import { generateAccessToken, generateRefreshToken, sendToken } from "../utils/generateToken";
+import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
 import { Fare, Ride, User } from "../db/schema";
 
 
@@ -20,27 +20,43 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
  */
 export const refreshToken = async (req: Request, res: Response) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
-    console.log('Refresh Token  ', refreshToken)
+    const refreshToken = req.cookies.userRefreshToken;
+    console.log("🔹 Step 1: Received refresh token:", refreshToken || "❌ No token in cookies");
 
-    if (!refreshToken) return res.status(401).json({ message: "Refresh token required" });
+    // Check for token presence
+    if (!refreshToken) {
+      console.log("🚫 No refresh token found in cookies.");
+      return res.status(401).json({ message: "Refresh token required" });
+    }
 
     // Verify token
-    jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded) => {
-      if (err) return res.status(403).json({ message: "Invalid or expired refresh token" });
+    console.log("🔹 Step 2: Verifying refresh token...");
+    jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded: any) => {
+      if (err) {
+        console.log("🚫 Token verification failed:", err.message);
+        return res.status(403).json({ message: "Invalid or expired refresh token" });
+      }
 
+      console.log("✅ Step 3: Token verified successfully. Decoded payload:", decoded);
+
+      // Find user
+      console.log("🔹 Step 4: Searching for user with ID:", decoded.id);
       const user = await User.findById(decoded.id);
+
       if (!user) {
+        console.log("🚫 Step 5: No user found with this ID or token invalidated.");
         return res.status(403).json({ message: "Refresh token not found or already invalidated" });
       }
 
       // Generate new access token
+      console.log("✅ Step 6: User found. Generating new access token...");
       const newAccessToken = generateAccessToken(user._id);
+      console.log("✅ Step 7: New Access Token generated successfully!");
 
       return res.json({ accessToken: newAccessToken });
     });
   } catch (error) {
-    console.error("Refresh Token Error:", error);
+    console.error("🔥 Step 8: Unhandled error in refreshToken:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -50,8 +66,9 @@ export const refreshToken = async (req: Request, res: Response) => {
  */
 export const logout = async (req: Request, res: Response) => {
   try {
+    console.log('Logging Out User')
     // Clear the refresh token cookie
-    res.cookie("refreshToken", "", {
+    res.cookie("userRefreshToken", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production", // only over HTTPS in prod
       sameSite: "strict",
@@ -71,6 +88,7 @@ export const logout = async (req: Request, res: Response) => {
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const { phone_number } = req.body;
+    console.log('user', phone_number)
     await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID!)
       .verifications.create({
@@ -101,6 +119,15 @@ export const verifyOtp = async (req: Request, res: Response) => {
     let existingUser = await User.findOne({ phone_number });
 
     if (existingUser) {
+
+      // Step 2: Check if approved
+      if (!existingUser.is_approved) {
+        return res.status(403).json({
+          success: false,
+          message: "Your account is suspended. please contact support.",
+        });
+      }
+
       // Convert MongoDB _id -> id
       const userData = existingUser.toObject();
       userData.id = userData._id;
@@ -111,7 +138,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       const accessToken = generateAccessToken(userData.id)
       const refreshToken = generateRefreshToken(userData.id)
 
-      res.cookie("refreshToken", refreshToken, {
+      res.cookie("userRefreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production", // only over HTTPS in production
         sameSite: "strict",

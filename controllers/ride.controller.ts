@@ -1,6 +1,6 @@
 require("dotenv").config();
 import { NextFunction, Request, Response } from "express";
-import { driver, DriverWallet, Fare, Ride } from "../db/schema";
+import { driver, DriverWallet, Fare, Ride, User } from "../db/schema";
 import { generateOtp } from "../utils/generateOtp";
 import { calculateDistance } from "../utils/calculateDistance";
 
@@ -91,6 +91,10 @@ export const newRide = async (req: Request, res: Response) => {
         );
 
         await driver.findByIdAndUpdate(driverId, {
+            $inc: { pendingRides: 1 },
+        });
+
+        await User.findByIdAndUpdate(driverId, {
             $inc: { pendingRides: 1 },
         });
 
@@ -230,6 +234,20 @@ export const updatingRideStatus = async (req: any, res: Response) => {
                 ]
             );
 
+            await User.updateOne(
+                { _id: ride.userId },
+                [
+                    {
+                        $set: {
+                            pendingRides: {
+                                $cond: [{ $gt: ["$pendingRides", 0] }, { $subtract: ["$pendingRides", 1] }, 0]
+                            },
+                            totalRides: { $add: ["$totalRides", 1] },
+                        }
+                    }
+                ]
+            );
+
         }
 
         res.status(201).json({
@@ -355,6 +373,128 @@ export const cancelRide = async (req: any, res: Response) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: error?.message });
+    }
+};
+
+
+export const ratingDriver = async (req: Request, res: Response) => {
+    try {
+        const { rating, rideId } = req.body;
+        console.log("⭐ Driver Rating received:", req.body);
+
+        if (!rating || !rideId) {
+            console.log("Missing fields");
+            return res.status(400).json({ message: "Missing fields" });
+        }
+
+        // Find the ride and driver
+        const ride = await Ride.findById(rideId).populate("driverId");
+        if (!ride) return res.status(404).json({ message: "Ride not found" });
+
+        // Prevent duplicate rating
+        if (ride.driverRating && ride.driverRating > 0) {
+            return res.status(400).json({ message: "Driver already rated for this ride." });
+        }
+
+        // Save driver's rating
+        ride.driverRating = rating;
+
+        // ✅ Calculate average rating (driverRating + userRating) / 2
+        if (ride.userRating) {
+            ride.rating = Number(((ride.driverRating + ride.userRating) / 2).toFixed(2));
+        } else {
+            ride.rating = ride.driverRating; // if only one available
+        }
+
+        await ride.save();
+
+        // ✅ Update driver's average rating & total ratings
+        if (ride.driverId) {
+            const Driver = await driver.findById(ride.driverId._id || ride.driverId);
+            if (Driver) {
+                const totalRidesRated = Driver.totalRatings || 0;
+                const currentAverage = Driver.ratings || 0;
+
+                const newAverage =
+                    (currentAverage * totalRidesRated + rating) / (totalRidesRated + 1);
+
+                Driver.totalRatings = totalRidesRated + 1;
+                Driver.ratings = Number(newAverage.toFixed(2));
+                await Driver.save();
+
+                console.log(`✅ Updated driver ${Driver.name}: avg=${Driver.ratings}, total=${Driver.totalRatings}`);
+            }
+        }
+
+        const updatedRide = await Ride.findById(rideId).populate("driverId");
+
+        return res.status(200).json({
+            message: "Driver rating submitted successfully",
+            updatedRide,
+        });
+    } catch (error) {
+        console.error("❌ Error submitting driver rating:", error);
+        return res.status(500).json({ message: "Server error", error });
+    }
+};
+
+export const ratingUser = async (req: Request, res: Response) => {
+    try {
+        const { rating, rideId } = req.body;
+        console.log("⭐ User Rating received:", req.body);
+
+        if (!rating || !rideId) {
+            console.log("Missing fields");
+            return res.status(400).json({ message: "Missing fields" });
+        }
+
+        const ride = await Ride.findById(rideId);
+        if (!ride) return res.status(404).json({ message: "Ride not found" });
+
+        // Prevent duplicate rating
+        if (ride.userRating && ride.userRating > 0) {
+            return res.status(400).json({ message: "User already rated for this ride." });
+        }
+
+        // Save user's rating
+        ride.userRating = rating;
+
+        // ✅ Calculate average rating (driverRating + userRating) / 2
+        if (ride.driverRating) {
+            ride.rating = Number(((ride.driverRating + ride.userRating) / 2).toFixed(2));
+        } else {
+            ride.rating = ride.userRating; // if only one available
+        }
+
+        await ride.save();
+
+        // ✅ Update user’s average rating
+        if (ride.userId) {
+            const user = await User.findById(ride.userId._id || ride.userId);
+            if (user) {
+                const totalRidesRated = user.totalRatings || 0;
+                const currentAverage = user.ratings || 0;
+
+                const newAverage =
+                    (currentAverage * totalRidesRated + rating) / (totalRidesRated + 1);
+
+                user.totalRatings = totalRidesRated + 1;
+                user.ratings = Number(newAverage.toFixed(2));
+                await user.save();
+
+                console.log(`✅ Updated user ${user.name}: avg=${user.ratings}, total=${user.totalRatings}`);
+            }
+        }
+
+        const updatedRide = await Ride.findById(rideId).populate("userId");
+
+        return res.status(200).json({
+            message: "User rating submitted successfully",
+            updatedRide,
+        });
+    } catch (error) {
+        console.error("❌ Error submitting user rating:", error);
+        return res.status(500).json({ message: "Server error", error });
     }
 };
 

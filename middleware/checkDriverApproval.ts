@@ -23,6 +23,7 @@ export const checkDriverApproval = async (req: Request, res: Response, next: Nex
     }
 
     // All good, continue
+    console.log('Approved Driver')
     next();
   } catch (err) {
     console.error("Driver approval check error:", err);
