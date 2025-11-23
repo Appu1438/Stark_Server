@@ -367,5 +367,56 @@ export const updateUserPushToken = async (req: any, res: Response) => {
   }
 };
 
+export const savePlaces = async (req: any, res: Response) => {
+  const { label, address, location, placeId } = req.body;
+
+  console.log(req.body)
+
+  try {
+
+    const user = await User.findById(req.user.id);
+
+    user.savedPlaces.push({
+      placeId: placeId,
+      label,
+      address,
+      location
+    });
+
+    await user.save();
+
+    res.json({ message: "Place saved successfully", savedPlaces: user.savedPlaces });
+  } catch (error) {
+    console.error("Error updating saved places:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 
+export const getSavedPlaces = async (req: any, res: Response) => {
+  try {
+    const user = await User.findById(req.user.id);
+    // console.log(user)
+    res.status(200).json({ data: user.savedPlaces });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ success: false, message: "Error fetching places" });
+  }
+};
+
+export const deletedSavedPlaces = async (req: any, res: Response) => {
+  try {
+    const { placeId } = req.params;
+
+    await User.updateOne(
+      { _id: req.user.id },
+      { $pull: { savedPlaces: { _id: placeId } } }
+    );
+
+    res.json({ message: "Place removed" });
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ success: false, message: "Error deleting places" });
+  }
+};

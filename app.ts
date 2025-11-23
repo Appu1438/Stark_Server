@@ -29,10 +29,10 @@ app.use(cookieParser());
 // enable cors
 app.use(cors({
   origin: [
-    "http://192.168.1.2:3000",
-    "http://192.168.1.2:5000",
-    "http://192.168.1.2:8081",
-    "http://192.168.1.2:8082"
+    "http://192.168.1.6:3000",
+    "http://192.168.1.6:5000",
+    "http://192.168.1.6:8081",
+    "http://192.168.1.6:8082"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true, // ✅ required for cookies

@@ -411,32 +411,46 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             $or: [
                 { email },
                 { phone_number },
-                { registration_number }
+                { registration_number },
+                { aadhar },
+                { driving_license },
+                { insurance_number }
             ],
         });
 
+
         if (existingDriver) {
             let message = "Duplicate entry detected!";
-            if (existingDriver.email === email) message = "Email already registered!";
-            else if (existingDriver.phone_number === phone_number) message = "Phone number already registered!";
-            else if (existingDriver.registration_number === registration_number) message = "Registration number already exists!";
+
+            if (existingDriver.email === email)
+                message = "Email already registered!";
+            else if (existingDriver.phone_number === phone_number)
+                message = "Phone number already registered!";
+            else if (existingDriver.registration_number === registration_number)
+                message = "Registration number already exists!";
+            else if (existingDriver.aadhar === aadhar)
+                message = "Aadhar number already registered!";
+            else if (existingDriver.driving_license === driving_license)
+                message = "Driving license number already registered!";
+            else if (existingDriver.insurance_number === insurance_number)
+                message = "Insurance number already registered!";
 
             return res.status(409).json({ success: false, message });
         }
 
-        const typeUpper = vehicle_type.toUpperCase();
+        // const typeUpper = vehicle_type.toUpperCase();
 
-        const baseFare = parseFloat(process.env[`BASEFARE_${typeUpper}`] || "0");
-        const perKmRate = parseFloat(process.env[`PERKM_${typeUpper}`] || "0");
-        const perMinRate = parseFloat(process.env[`PERMIN_${typeUpper}`] || "0");
-        const minFare = parseFloat(process.env[`MINFARE_${typeUpper}`] || "0");
+        // const baseFare = parseFloat(process.env[`BASEFARE_${typeUpper}`] || "0");
+        // const perKmRate = parseFloat(process.env[`PERKM_${typeUpper}`] || "0");
+        // const perMinRate = parseFloat(process.env[`PERMIN_${typeUpper}`] || "0");
+        // const minFare = parseFloat(process.env[`MINFARE_${typeUpper}`] || "0");
 
-        if (!baseFare || !perKmRate || !perMinRate || !minFare) {
-            return res.status(500).json({
-                success: false,
-                message: `Fare not fully configured for vehicle type: ${vehicle_type}`,
-            });
-        }
+        // if (!baseFare || !perKmRate || !perMinRate || !minFare) {
+        //     return res.status(500).json({
+        //         success: false,
+        //         message: `Fare not fully configured for vehicle type: ${vehicle_type}`,
+        //     });
+        // }
 
         // 🔑 Convert string -> Date objects safely
         // 🔑 Helper function
@@ -479,10 +493,10 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             insurance_expiry: parseDate(insurance_expiry),
             vehicle_color,
             capacity,
-            baseFare,
-            perKmRate,
-            perMinRate,
-            minFare,
+            // baseFare,
+            // perKmRate,
+            // perMinRate,
+            // minFare,
         });
 
         await Driver.save();
@@ -496,7 +510,6 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
         res.status(400).json({ success: false, message: "Your OTP is expired or invalid!" });
     }
 };
-
 
 
 // get logged in driver data

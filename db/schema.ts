@@ -94,6 +94,7 @@ const driverSchema = new Schema({
     osName: { type: String, default: null },
     osBuildId: { type: String, default: null },
   },
+  
   vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv"] },
   registration_number: { type: String, unique: true },
   registration_date: Date,
@@ -185,6 +186,18 @@ const userSchema = new Schema({
 
   totalRatings: { type: Number, default: 0 },
   ratings: { type: Number, default: 0 },
+
+  savedPlaces: [
+    {
+      placeId: String,
+      label: String,
+      address: String,
+      location: {
+        latitude: Number,
+        longitude: Number
+      }
+    }
+  ],
 
   totalRides: { type: Number, default: 0 },
   pendingRides: { type: Number, default: 0 },

@@ -1,12 +1,15 @@
 import express from "express";
 import {
   calculateFare,
+  deletedSavedPlaces,
   findRideById,
   getAllRides,
   getLoggedInUserData,
+  getSavedPlaces,
   logout,
   refreshToken,
   registerUser,
+  savePlaces,
   sendingOtpToEmail,
   updateUserPushToken,
   verifyingEmail,
@@ -37,6 +40,12 @@ userRouter.put("/update-push-token", isAuthenticated, checkUserApproval, updateU
 userRouter.get("/get-rides", isAuthenticated, checkUserApproval, getAllRides);
 
 userRouter.get("/ride/:id", isAuthenticated, checkUserApproval, findRideById);
+
+userRouter.post("/save-place", isAuthenticated, checkUserApproval, savePlaces);
+
+userRouter.get("/save-place", isAuthenticated, checkUserApproval, getSavedPlaces);
+
+userRouter.delete("/save-place/:placeId", isAuthenticated, checkUserApproval, deletedSavedPlaces);
 
 
 export default userRouter;
