@@ -184,35 +184,35 @@ export const updatingRideStatus = async (req: any, res: Response) => {
         }
 
         // Check for proximity before updating status
-        if (rideStatus === "Arrived") {
-            const distanceToPickup = calculateDistance(
-                driverLocation.latitude,
-                driverLocation.longitude,
-                ride?.currentLocation?.latitude,
-                ride?.currentLocation?.longitude
-            );
+        // if (rideStatus === "Arrived") {
+        //     const distanceToPickup = calculateDistance(
+        //         driverLocation.latitude,
+        //         driverLocation.longitude,
+        //         ride?.currentLocation?.latitude,
+        //         ride?.currentLocation?.longitude
+        //     );
 
-            if (distanceToPickup > 1) {
-                return res.status(400).json({
-                    message: "You must be within 1 km of the pickup location to mark as Arrived",
-                });
-            }
-        }
+        //     if (distanceToPickup > 1) {
+        //         return res.status(400).json({
+        //             message: "You must be within 1 km of the pickup location to mark as Arrived",
+        //         });
+        //     }
+        // }
 
-        if (rideStatus === "Reached") {
-            const distanceToDrop = calculateDistance(
-                driverLocation.latitude,
-                driverLocation.longitude,
-                ride?.destinationLocation?.latitude,
-                ride?.destinationLocation?.longitude
-            );
+        // if (rideStatus === "Reached") {
+        //     const distanceToDrop = calculateDistance(
+        //         driverLocation.latitude,
+        //         driverLocation.longitude,
+        //         ride?.destinationLocation?.latitude,
+        //         ride?.destinationLocation?.longitude
+        //     );
 
-            if (distanceToDrop > 1) {
-                return res.status(400).json({
-                    message: "You must be within 1 km of the destination to mark as Reached",
-                });
-            }
-        }
+        //     if (distanceToDrop > 1) {
+        //         return res.status(400).json({
+        //             message: "You must be within 1 km of the destination to mark as Reached",
+        //         });
+        //     }
+        // }
 
         ride.status = rideStatus;
         await ride.save();

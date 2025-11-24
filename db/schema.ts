@@ -106,7 +106,7 @@ const driverSchema = new Schema({
   insurance_expiry: Date,
 
   status: { type: String, default: "inactive", enum: ["active", "inactive"] },
-  is_approved: { type: Boolean, default: false },
+  is_approved: { type: Boolean, default: true },
 
   ratings: { type: Number, default: 0 }, // average rating
   totalRatings: { type: Number, default: 0 }, // number of ratings received

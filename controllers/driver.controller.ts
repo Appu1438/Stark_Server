@@ -307,7 +307,8 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             insurance_number,
             insurance_expiry,
             vehicle_color,
-            capacity
+            capacity,
+            profilePic
         } = req.body;
 
 
@@ -331,7 +332,8 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             insurance_number,
             insurance_expiry,
             vehicle_color,
-            capacity
+            capacity,
+            profilePic
         };
         const token = jwt.sign(
             {
@@ -404,7 +406,8 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             insurance_number,
             insurance_expiry,
             vehicle_color,
-            capacity
+            capacity,
+            profilePic
         } = newDriver.driver;
 
         const existingDriver = await driver.findOne({
@@ -493,6 +496,7 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             insurance_expiry: parseDate(insurance_expiry),
             vehicle_color,
             capacity,
+            profilePic
             // baseFare,
             // perKmRate,
             // perMinRate,
@@ -704,7 +708,7 @@ export const getAllRides = async (req: any, res: Response) => {
 export const getDriverEarnings = async (req: any, res: any) => {
     try {
         const driverId = req.driver?.id;
-        const { period } = req.query; // "daily" | "weekly" | "monthly"
+        const { period } = req.query;
 
         if (!driverId) {
             return res.status(400).json({ message: "Driver ID required" });
@@ -712,7 +716,6 @@ export const getDriverEarnings = async (req: any, res: any) => {
 
         const objectId = new mongoose.Types.ObjectId(driverId);
 
-        // 🕓 Find driver's first completed ride
         const firstRide = await Ride.findOne({
             driverId: objectId,
             status: "Completed",
@@ -724,7 +727,9 @@ export const getDriverEarnings = async (req: any, res: any) => {
             return res.json({
                 message: "No rides found",
                 period,
-                totalEarnings: 0,
+                totalFare: 0,
+                driverEarnings: 0,
+                platformFee: 0,
                 rideCount: 0,
                 chartData: [],
             });
@@ -739,15 +744,16 @@ export const getDriverEarnings = async (req: any, res: any) => {
         // ---------------- DAILY ----------------
         if (period === "daily") {
             groupFormat = { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } };
+
             const current = new Date(firstRideDate);
             while (current <= now) {
                 labels.push(current.toISOString().split("T")[0]);
                 current.setDate(current.getDate() + 1);
             }
+        }
 
-            // ---------------- WEEKLY ----------------
-        } else if (period === "weekly") {
-            // ✅ Fix: No “W” prefix in group key, only add it later for chart
+        // ---------------- WEEKLY ----------------
+        else if (period === "weekly") {
             groupFormat = {
                 $concat: [
                     { $toString: { $isoWeek: "$createdAt" } },
@@ -758,28 +764,30 @@ export const getDriverEarnings = async (req: any, res: any) => {
 
             const start = new Date(firstRideDate);
             const current = new Date(start);
+
             while (current <= now) {
                 const week = getWeekNumber(current);
-                labels.push(`${week}-${current.getFullYear()}`); // ✅ Match Mongo format
+                labels.push(`${week}-${current.getFullYear()}`);
                 current.setDate(current.getDate() + 7);
             }
+        }
 
-            // ---------------- MONTHLY ----------------
-        } else if (period === "monthly") {
+        // ---------------- MONTHLY ----------------
+        else if (period === "monthly") {
             groupFormat = { $dateToString: { format: "%Y-%m", date: "$createdAt" } };
-            const start = new Date(firstRideDate);
-            const current = new Date(start);
+
+            const current = new Date(firstRideDate);
             while (current <= now) {
-                const label = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`;
-                labels.push(label);
+                labels.push(
+                    `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`
+                );
                 current.setMonth(current.getMonth() + 1);
             }
-
         } else {
             return res.status(400).json({ message: "Invalid period" });
         }
 
-        // --- Aggregate earnings ---
+        // 🔥 AGGREGATION: Add new fields totalFare & platformFee
         const earnings = await Ride.aggregate([
             {
                 $match: {
@@ -791,35 +799,47 @@ export const getDriverEarnings = async (req: any, res: any) => {
             {
                 $group: {
                     _id: groupFormat,
-                    totalEarnings: { $sum: "$driverEarnings" },
+                    totalFare: { $sum: "$totalFare" }, // 👈 NEW
+                    driverEarnings: { $sum: "$driverEarnings" }, // existing
+                    platformFee: { $sum: "$platformShare" }, // 👈 NEW
                     rideCount: { $sum: 1 },
                 },
             },
             { $sort: { _id: 1 } },
         ]);
 
-        // --- Map to dictionary ---
         const earningsMap = new Map(earnings.map((e) => [e._id, e]));
 
-        // --- Build chart data ---
-        const chartData = labels.map((label) => ({
-            label:
-                period === "weekly"
-                    ? "W" + label // only add prefix for chart display
-                    : label,
-            totalEarnings: earningsMap.get(label)?.totalEarnings || 0,
-            rideCount: earningsMap.get(label)?.rideCount || 0,
-        }));
+        // FINAL CHART DATA
+        const chartData = labels.map((label) => {
+            const data = earningsMap.get(label) || {};
 
-        const totalEarnings = chartData.reduce((sum, e) => sum + e.totalEarnings, 0);
+            return {
+                label:
+                    period === "weekly"
+                        ? "W" + label
+                        : label,
+                totalFare: data.totalFare || 0,
+                driverEarnings: data.driverEarnings || 0,
+                platformFee: data.platformFee || 0,
+                rideCount: data.rideCount || 0,
+            };
+        });
+
+        // SUM TOTALS
+        const totalFare = chartData.reduce((sum, e) => sum + e.totalFare, 0);
+        const totalDriver = chartData.reduce((sum, e) => sum + e.driverEarnings, 0);
+        const totalPlatform = chartData.reduce((sum, e) => sum + e.platformFee, 0);
         const rideCount = chartData.reduce((sum, e) => sum + e.rideCount, 0);
 
         res.json({
             period,
-            totalEarnings,
-            rideCount,
             from: firstRideDate,
             to: now,
+            totalFare,
+            driverEarnings: totalDriver,
+            platformFee: totalPlatform,
+            rideCount,
             chartData,
         });
     } catch (err) {
@@ -827,6 +847,7 @@ export const getDriverEarnings = async (req: any, res: any) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 
 // Helper: ISO week number
 function getWeekNumber(d: Date) {
