@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from "express";
 import { driver, DriverWallet, Fare, Ride, User } from "../db/schema";
 import { generateOtp } from "../utils/generateOtp";
 import { calculateDistance } from "../utils/calculateDistance";
+import { sendPushNotification } from "../utils/sendNotification";
 
 export const newRide = async (req: Request, res: Response) => {
     try {
@@ -218,13 +219,19 @@ export const updatingRideStatus = async (req: any, res: Response) => {
         await ride.save();
 
         if (rideStatus === "Completed") {
+
+            // Update driver ride stats
             await driver.updateOne(
                 { _id: driverId },
                 [
                     {
                         $set: {
                             pendingRides: {
-                                $cond: [{ $gt: ["$pendingRides", 0] }, { $subtract: ["$pendingRides", 1] }, 0]
+                                $cond: [
+                                    { $gt: ["$pendingRides", 0] },
+                                    { $subtract: ["$pendingRides", 1] },
+                                    0
+                                ]
                             },
                             totalEarning: { $add: ["$totalEarning", ride.totalFare] },
                             totalRides: { $add: ["$totalRides", 1] },
@@ -234,13 +241,18 @@ export const updatingRideStatus = async (req: any, res: Response) => {
                 ]
             );
 
+            // Update user stats
             await User.updateOne(
                 { _id: ride.userId },
                 [
                     {
                         $set: {
                             pendingRides: {
-                                $cond: [{ $gt: ["$pendingRides", 0] }, { $subtract: ["$pendingRides", 1] }, 0]
+                                $cond: [
+                                    { $gt: ["$pendingRides", 0] },
+                                    { $subtract: ["$pendingRides", 1] },
+                                    0
+                                ]
                             },
                             totalRides: { $add: ["$totalRides", 1] },
                         }
@@ -248,7 +260,29 @@ export const updatingRideStatus = async (req: any, res: Response) => {
                 ]
             );
 
+            // ---------------------------------------
+            //  🚨 HANDLE PENDING SUSPENSION AFTER RIDE
+            // ---------------------------------------
+            const DriverData = await driver.findById(driverId);
+
+            if (DriverData?.pending_suspension) {
+                DriverData.is_approved = false;     // suspend
+                DriverData.pending_suspension = false; // clear flag
+                await DriverData.save();
+
+                console.log("🚨 Driver suspended after ride completion:", driverId);
+
+                // OPTIONAL: Send push notification
+                if (DriverData.notificationToken) {
+                    sendPushNotification(
+                        DriverData.notificationToken,
+                        "Account Suspended",
+                        "Your account has been suspended. Contact support for more info."
+                    );
+                }
+            }
         }
+
 
         res.status(201).json({
             success: true,

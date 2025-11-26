@@ -94,7 +94,7 @@ const driverSchema = new Schema({
     osName: { type: String, default: null },
     osBuildId: { type: String, default: null },
   },
-  
+
   vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv"] },
   registration_number: { type: String, unique: true },
   registration_date: Date,
@@ -106,7 +106,14 @@ const driverSchema = new Schema({
   insurance_expiry: Date,
 
   status: { type: String, default: "inactive", enum: ["active", "inactive"] },
+  lastActive: {
+    type: Date,
+    default: Date.now,
+  }, 
+    
   is_approved: { type: Boolean, default: true },
+  pending_suspension: { type: Boolean, default: false },
+
 
   ratings: { type: Number, default: 0 }, // average rating
   totalRatings: { type: Number, default: 0 }, // number of ratings received

@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride, Transaction, User } from "../db/schema";
 import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
+import { sendPushNotification } from "../utils/sendNotification";
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
@@ -379,24 +380,92 @@ export const approveDriver = async (req: any, res: Response) => {
 };
 
 
-// De-approve Driver
 export const deapproveDriver = async (req: any, res: Response) => {
   try {
-    const { id } = req.params;
-    const { remark } = req.body; // ✅ get remark from frontend
+    const { id } = req.params;        // driverId
+    const { remark } = req.body;
     const adminId = req.admin.id;
 
-    const foundDriver = await driver.findById(id);
-    if (!foundDriver) {
+    const Driver = await driver.findById(id);
+
+    if (!Driver) {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
-    if (!foundDriver.is_approved) {
-      return res.status(400).json({ success: false, message: "Driver already not approved" });
+
+    // Already de-approved
+    if (!Driver.is_approved ) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver already not approved",
+      });
+    }
+    if (Driver.pending_suspension ) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver marked for suspension",
+      });
     }
 
-    foundDriver.is_approved = false;
-    await foundDriver.save();
+    // 🔍 Check if driver has an active ride
+    const activeRide = await Ride.findOne({
+      driverId: id,
+      status: { $in: ["Booked", "Processing", "Arrived", "Ongoing", "Reached"] },
+    });
 
+    if (activeRide) {
+      // 🚫 Cannot suspend now → mark for later
+      Driver.pending_suspension = true;
+      await Driver.save();
+
+      // 🔔 Notify driver that suspension will apply after ride
+      if (Driver.notificationToken) {
+        await sendPushNotification(
+          Driver.notificationToken,
+          "⚠️ Suspension Pending",
+          "Your account has been marked for suspension. It will take effect after your current ride is completed."
+        );
+      }
+
+      // 📝 Log audit
+      await driverAuditLog.findOneAndUpdate(
+        { driverId: id },
+        {
+          $push: {
+            history: {
+              action: "Pending Suspension",
+              actionBy: adminId,
+              actionOn: new Date(),
+              remark: remark || "Suspension queued until active ride completes",
+            },
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      return res.json({
+        success: true,
+        pending: true,
+        message: "Driver has an active ride. Suspension is marked and will be applied after ride completion.",
+        data: Driver,
+
+      });
+    }
+
+    // ✅ No active ride → suspend immediately
+    Driver.is_approved = false;
+    Driver.pending_suspension = false;
+    await Driver.save();
+
+    // 🔔 Notify driver immediately
+    if (Driver.notificationToken) {
+      await sendPushNotification(
+        Driver.notificationToken,
+        "🚫 Account Suspended",
+        remark || "Your StarkCabs driver account has been suspended. Contact support for assistance."
+      );
+    }
+
+    // 📝 Audit log
     await driverAuditLog.findOneAndUpdate(
       { driverId: id },
       {
@@ -405,21 +474,26 @@ export const deapproveDriver = async (req: any, res: Response) => {
             action: "De-Approved",
             actionBy: adminId,
             actionOn: new Date(),
-            remark: remark || "De-approved without remark" // ✅ store remark
+            remark: remark || "De-approved without remark"
           },
         },
       },
       { upsert: true, new: true }
     );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Driver de-approved successfully",
-      data: foundDriver,
+      pending: false,
+      message: "Driver de-approved successfully.",
+      data: Driver,
     });
+
   } catch (error) {
     console.error("Error de-approving driver:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -528,6 +602,8 @@ export const getDriverWallet = async (req: Request, res: Response) => {
 
     // ✅ Find wallet (or create empty wallet if not found)
     let wallet = await DriverWallet.findOne({ driverId });
+    console.log(wallet)
+
 
     if (!wallet) {
       // Create a wallet if not found (optional, depends on your business logic)
@@ -865,10 +941,10 @@ export const getRides = async (req: Request, res: Response) => {
     const rides = await Ride.find()
       .sort({ createdAt: -1 })
       .populate({
-        path: "driverId",       
+        path: "driverId",
       })
       .populate({
-        path:"userId"
+        path: "userId"
       });
 
     if (!rides || rides.length === 0) {

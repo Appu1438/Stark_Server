@@ -26,43 +26,82 @@ export const refreshTokenDriver = async (req: Request, res: Response) => {
         const refreshToken = req.cookies.driverRefreshToken;
         console.log("🚘 [Driver Refresh] Step 1: Received refresh token:", refreshToken || "❌ No token found in cookies");
 
-        // Check if refresh token exists
         if (!refreshToken) {
             console.log("🚫 [Driver Refresh] No refresh token found in cookies.");
             return res.status(401).json({ message: "Refresh token required" });
         }
 
-        // Verify the refresh token
+        // Verify the refresh token 
         console.log("🔍 [Driver Refresh] Step 2: Verifying refresh token...");
         jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded: any) => {
             if (err) {
-                console.log("🚫 [Driver Refresh] Token verification failed:", err.message);
+
+                console.log("🚫 [Driver Refresh] Token verification failed:", err.name);
+
+                // ❗ Check ACTIVE RIDE if token is expired
+                if (err.name === "TokenExpiredError") {
+                    // ❗ Decode without verifying (works even when expired)
+                    const decodedExpired: any = jwt.decode(refreshToken);
+
+                    if (!decodedExpired || !decodedExpired.id) {
+                        return res.status(403).json({ message: "Invalid refresh token" });
+                    }
+
+                    const Driver = await driver.findById(decodedExpired?.id);
+
+                    if (!Driver) {
+                        console.log("🚫 [Driver Refresh] Step 2.25: Driver not found for temp acces token.");
+
+                        return res.status(403).json({ message: "Invalid refresh token" });
+                    }
+
+                    // 🔍 Check active ride
+                    const activeRide = await Ride.findOne({
+                        driverId: Driver._id,
+                        status: { $in: ["Booked", "Processing", "Arrived", "Ongoing", "Reached"] },
+                    });
+
+                    if (activeRide) {
+                        console.log("✅ [Driver Refresh] Step 2.5: Token verified failed. Generating Temp Token");
+                        // 🔥 Give a short-lived backup token (10 minutes)
+                        const tempAccessToken = generateAccessToken(Driver._id);
+
+                        return res.json({
+                            accessToken: tempAccessToken,
+                            temp: true,
+                            message: "Temporary access granted until the ride ends.",
+                        });
+                    }
+                }
+
                 return res.status(403).json({ message: "Invalid or expired refresh token" });
             }
 
             console.log("✅ [Driver Refresh] Step 3: Token verified successfully. Decoded payload:", decoded);
+            // 🔥 Normal token refresh
 
-            // Find the driver in DB
             console.log("🔹 [Driver Refresh] Step 4: Searching driver with ID:", decoded.id);
-            const Driver = await driver.findById(decoded.id);
 
+            const Driver = await driver.findById(decoded.id);
             if (!Driver) {
+
                 console.log("🚫 [Driver Refresh] Step 5: Driver not found or token invalidated.");
-                return res.status(403).json({ message: "Refresh token not found or already invalidated" });
+                return res.status(403).json({ message: "Refresh token invalid" });
             }
 
-            // Generate a new access token
             console.log("✅ [Driver Refresh] Step 6: Driver found. Generating new access token...");
             const newAccessToken = generateAccessToken(Driver._id);
 
             console.log("✅ [Driver Refresh] Step 7: New access token generated successfully!");
-            return res.json({ accessToken: newAccessToken });
+            return res.json({ accessToken: newAccessToken, temp: false });
         });
+
     } catch (error) {
-        console.error("🔥 [Driver Refresh] Step 8: Unhandled error:", error);
+        console.error("Refresh error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
+
 
 
 /**
@@ -70,6 +109,8 @@ export const refreshTokenDriver = async (req: Request, res: Response) => {
  */
 export const logoutDriver = async (req: Request, res: Response) => {
     const { driverId } = req.body;
+
+    // ------------------- Validate Device Header -------------------
     const deviceHeader = req.headers["x-device-info"];
     if (!deviceHeader) {
         return res.status(400).json({ message: "Device info missing in request headers." });
@@ -77,30 +118,33 @@ export const logoutDriver = async (req: Request, res: Response) => {
 
     let deviceInfo: any;
     try {
-        deviceInfo = typeof deviceHeader === "string" ? JSON.parse(deviceHeader) : deviceHeader;
+        deviceInfo = typeof deviceHeader === "string"
+            ? JSON.parse(deviceHeader)
+            : deviceHeader;
     } catch (err) {
         return res.status(400).json({ message: "Invalid device info format." });
     }
 
-    const fingerprint = deviceInfo.fingerprint;
+    const fingerprint = deviceInfo?.fingerprint;
     if (!fingerprint) {
         return res.status(400).json({ message: "Device fingerprint missing in device info." });
     }
+
     if (!driverId) {
         return res.status(400).json({ message: "Driver ID is required" });
     }
 
     try {
-        // 1️⃣ Find driver first
+        // ------------------- Find Driver -------------------
         const existingDriver = await driver.findById(driverId);
 
         if (!existingDriver) {
             return res.status(404).json({ message: "Driver not found" });
         }
 
+        // ------------------- Device Mismatch Handling -------------------
         let updatedDriver = existingDriver;
 
-        // 2️⃣ Only update status if device matches
         if (
             fingerprint &&
             existingDriver.activeDevice &&
@@ -108,12 +152,15 @@ export const logoutDriver = async (req: Request, res: Response) => {
         ) {
             updatedDriver = await driver.findByIdAndUpdate(
                 driverId,
-                { status: "inactive" },
+                {
+                    status: "inactive",
+                    lastActive: new Date(),
+                },
                 { new: true }
             );
         }
 
-        // 3️⃣ Clear refresh token cookie
+        // ------------------- Clear Refresh Token Cookie -------------------
         res.cookie("driverRefreshToken", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
@@ -121,13 +168,13 @@ export const logoutDriver = async (req: Request, res: Response) => {
             maxAge: 0,
         });
 
-        // 4️⃣ Respond success
+        // ------------------- Success Response -------------------
         return res.status(200).json({
             success: true,
             message:
                 updatedDriver?.status === "inactive"
-                    ? "Driver logged out successfully"
-                    : "Driver session terminated (different device)",
+                    ? "Driver logged out successfully."
+                    : "Driver session terminated on a different device.",
             driver: updatedDriver,
         });
 
@@ -136,6 +183,7 @@ export const logoutDriver = async (req: Request, res: Response) => {
         return res.status(500).json({ message: "Internal server error" });
     }
 };
+
 
 // sending otp to driver phone number
 export const sendingOtpToPhone = async (
@@ -194,6 +242,8 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 message: "Your account is not approved yet. Please wait for our approval.",
             });
         }
+
+
 
         // Step 3: Verify OTP
         const verification = await client.verify.v2
@@ -592,7 +642,7 @@ export const updateDriverStatus = async (req: any, res: Response) => {
         if (activeRide) {
             return res.status(400).json({
                 success: false,
-                message: "You cannot change your status while on an active ride.",
+                message: "You can't change your status while on an active ride.",
             });
         }
 
@@ -793,7 +843,10 @@ export const getDriverEarnings = async (req: any, res: any) => {
                 $match: {
                     driverId: objectId,
                     status: "Completed",
-                    createdAt: { $gte: firstRideDate, $lte: now },
+                    createdAt: {
+                        $gte: new Date(firstRideDate.setHours(0, 0, 0, 0)),
+                        $lte: new Date(now.setHours(23, 59, 59, 999))
+                    }
                 },
             },
             {

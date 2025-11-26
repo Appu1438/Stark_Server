@@ -18,14 +18,15 @@ import {
 import { isAuthenticatedDriver } from "../middleware/isAuthenticated";
 import { checkDriverDevice } from "../middleware/checkDevice";
 import { checkDriverApproval } from "../middleware/checkDriverApproval";
+import { checkActiveRide } from "../middleware/checkActiveRide";
 
 const driverRouter = express.Router();
 
 driverRouter.post("/send-otp", sendingOtpToPhone);
 
-driverRouter.post("/login", verifyPhoneOtpForLogin);
+driverRouter.post("/login", checkActiveRide, verifyPhoneOtpForLogin);
 
-driverRouter.post("/logout", logoutDriver);
+driverRouter.post("/logout", checkActiveRide, logoutDriver);
 
 driverRouter.post("/refresh-token", refreshTokenDriver);
 
@@ -39,7 +40,7 @@ driverRouter.get("/wallet", isAuthenticatedDriver, checkDriverDevice, checkDrive
 
 driverRouter.get("/get-drivers-data", getDriversById);
 
-driverRouter.put("/update-status", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, updateDriverStatus);
+driverRouter.put("/update-status", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, checkActiveRide, updateDriverStatus);
 
 driverRouter.put("/update-push-token", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, updateDriverPushToken);
 
