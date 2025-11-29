@@ -95,7 +95,7 @@ export const newRide = async (req: Request, res: Response) => {
             $inc: { pendingRides: 1 },
         });
 
-        await User.findByIdAndUpdate(driverId, {
+        await User.findByIdAndUpdate(userId, {
             $inc: { pendingRides: 1 },
         });
 
@@ -363,6 +363,23 @@ export const cancelRide = async (req: any, res: Response) => {
                     },
 
                 },
+            ]
+        );
+        await User.updateOne(
+            { _id: userId },
+            [
+                {
+                    $set: {
+                        pendingRides: {
+                            $cond: [
+                                { $gt: ["$pendingRides", 0] },
+                                { $subtract: ["$pendingRides", 1] },
+                                0
+                            ]
+                        },
+                        cancelRides: { $add: ["$cancelRides", 1] }
+                    }
+                }
             ]
         );
 

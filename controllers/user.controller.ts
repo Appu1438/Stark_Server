@@ -300,7 +300,60 @@ export const getLoggedInUserData = async (req: any, res: Response) => {
 };
 
 
-// 📌 Get user rides
+// 📌 checl user active ride
+export const checkActiveRide = async (req: any, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    console.log('User Active', userId)
+
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. User not found.",
+      });
+    }
+
+    // Statuses that indicate an active ride
+    const activeStatuses = ["Booked", "Processing", "Arrived", "Ongoing", "Reached"];
+
+    // Find ONLY the active ride
+    const activeRide = await Ride.findOne({
+      userId,
+      status: { $in: activeStatuses },
+    })
+      .populate("userId")
+      .populate("driverId");
+
+    if (!activeRide) {
+      return res.status(200).json({
+        success: false,
+        hasActiveRide: false,
+        ride: null,
+      });
+    }
+
+    // Format response
+    const formattedRide = {
+      id: activeRide._id,
+      ...activeRide.toObject(),
+    };
+
+    return res.status(200).json({
+      success: true,
+      hasActiveRide: true,
+      ride: formattedRide,
+    });
+
+  } catch (error) {
+    console.error("Error checking user active ride:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
 export const getAllRides = async (req: any, res: Response) => {
   try {
     // console.log(req.user)

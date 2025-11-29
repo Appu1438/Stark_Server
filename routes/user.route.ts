@@ -1,6 +1,6 @@
 import express from "express";
 import {
-  calculateFare,
+  checkActiveRide,
   deletedSavedPlaces,
   findRideById,
   getAllRides,
@@ -36,6 +36,8 @@ userRouter.get("/me", isAuthenticated, checkUserApproval, getLoggedInUserData);
 
 userRouter.put("/update-push-token", isAuthenticated, checkUserApproval, updateUserPushToken);
 
+
+userRouter.get("/check-active-ride", isAuthenticated, checkUserApproval, checkActiveRide);
 
 userRouter.get("/get-rides", isAuthenticated, checkUserApproval, getAllRides);
 

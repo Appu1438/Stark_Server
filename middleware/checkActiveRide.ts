@@ -5,21 +5,29 @@ export const checkActiveRide = async (req: any, res: Response, next: NextFunctio
     try {
         let driverId = null;
 
-        // 1️⃣ Priority: authenticated driver from token
-        if (req.driver?.id) driverId = req.driver.id;
-
-        // 2️⃣ If driverId is passed in body (example: logout, profile update)
-        else if (req.body?.driverId) driverId = req.body.driverId;
-
-        // 3️⃣ If phone_number passed → find driver
-        else if (req.body?.phone_number) {
-            const foundDriver = await driver.findOne({ phone_number: req.body.phone_number });
-            if (foundDriver) driverId = foundDriver._id;
+        // 1️⃣ From token (protected routes)
+        if (req.driver?.id) {
+            driverId = req.driver.id;
         }
 
-        console.log('Active', driverId)
+        // 2️⃣ From body
+        else if (req.body?.driverId) {
+            driverId = req.body.driverId;
+        }
 
-        // 4️⃣ If STILL no driver, block
+        // 3️⃣ Login route → if phone_number provided, check if driver exists
+        else if (req.body?.phone_number) {
+            const foundDriver = await driver.findOne({ phone_number: req.body.phone_number });
+
+            // 🚨 If driver NOT found → allow login, skip ride check
+            if (!foundDriver) {
+                return next();
+            }
+
+            driverId = foundDriver._id;
+        }
+
+        // 4️⃣ If no driverId AND not login → block
         if (!driverId) {
             return res.status(401).json({
                 success: false,
@@ -27,7 +35,7 @@ export const checkActiveRide = async (req: any, res: Response, next: NextFunctio
             });
         }
 
-        // 5️⃣ Check for active ride
+        // 5️⃣ Check active ride
         const activeRide = await Ride.findOne({
             driverId,
             status: { $in: ["Booked", "Processing", "Arrived", "Ongoing", "Reached"] },
@@ -43,6 +51,7 @@ export const checkActiveRide = async (req: any, res: Response, next: NextFunctio
         }
 
         next();
+
     } catch (error) {
         console.error("Active ride check error:", error);
         return res.status(500).json({

@@ -209,6 +209,7 @@ const userSchema = new Schema({
   totalRides: { type: Number, default: 0 },
   pendingRides: { type: Number, default: 0 },
   cancelRides: { type: Number, default: 0 },
+  
 }, { timestamps: true });
 
 const transactionSchema = new Schema(
