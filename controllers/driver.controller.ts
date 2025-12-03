@@ -630,10 +630,30 @@ export const updateDriverStatus = async (req: any, res: Response) => {
         // Check if driver exists
         const Driver = await driver.findById(req.driver.id);
         if (!Driver) {
-            return res.status(404).json({ success: false, message: "Driver not found" });
+            return res.status(404).json({
+                success: false,
+                message: "Driver not found",
+            });
         }
 
-        // 🚫 Prevent status change during active rides
+        // ------------------------------
+        // 🔥 Wallet Check: Only when going ONLINE
+        // ------------------------------
+        if (status === "active") {
+            const driverWallet = await DriverWallet.findOne({ driverId: req.driver.id });
+
+            if (!driverWallet || driverWallet.balance <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Your wallet balance is low. Please recharge your wallet to go online.",
+                    code: "LOW_BALANCE",
+                });
+            }
+        }
+
+        // -------------------------------------
+        // 🚫 Prevent status change during rides
+        // -------------------------------------
         const activeRide = await Ride.findOne({
             driverId: req.driver.id,
             status: { $in: ["Processing", "Arrived", "Ongoing", "Reached"] },
@@ -643,22 +663,31 @@ export const updateDriverStatus = async (req: any, res: Response) => {
             return res.status(400).json({
                 success: false,
                 message: "You can't change your status while on an active ride.",
+                code: "ACTIVE_RIDE",
             });
         }
 
-        // ✅ Proceed to update status
+        // -------------------------------------
+        // ✅ Update online/offline status
+        // -------------------------------------
         Driver.status = status;
         await Driver.save();
 
-        // Clean response
         const driverObj = Driver.toObject();
         driverObj.id = driverObj._id;
         delete driverObj._id;
         delete driverObj.__v;
 
-        res.status(200).json({ success: true, driver: driverObj });
+        res.status(200).json({
+            success: true,
+            driver: driverObj,
+        });
+
     } catch (error: any) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
 };
 
