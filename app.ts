@@ -29,7 +29,6 @@ app.use(cookieParser());
 app.use(cors({
   origin: [
     process.env.ADMIN_DASHBOARD_URL,
-    process.env.PAYMENT_PAGE_URL,
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true, // ✅ required for cookies
