@@ -795,9 +795,13 @@ export const getDriverEarnings = async (req: any, res: any) => {
 
         const objectId = new mongoose.Types.ObjectId(driverId);
 
+        // First ride fetch
         const firstRide = await Ride.findOne({
             driverId: objectId,
-            status: "Completed",
+            $or: [
+                { status: "Completed" },
+                { status: "Cancelled", "cancelDetails.platformShare": { $gt: 0 } } // include midway cancelled
+            ]
         })
             .sort({ createdAt: 1 })
             .limit(1);
@@ -820,7 +824,7 @@ export const getDriverEarnings = async (req: any, res: any) => {
         let groupFormat: any;
         let labels: string[] = [];
 
-        // ---------------- DAILY ----------------
+        // === DAILY ===
         if (period === "daily") {
             groupFormat = { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } };
 
@@ -831,7 +835,7 @@ export const getDriverEarnings = async (req: any, res: any) => {
             }
         }
 
-        // ---------------- WEEKLY ----------------
+        // === WEEKLY ===
         else if (period === "weekly") {
             groupFormat = {
                 $concat: [
@@ -851,7 +855,7 @@ export const getDriverEarnings = async (req: any, res: any) => {
             }
         }
 
-        // ---------------- MONTHLY ----------------
+        // === MONTHLY ===
         else if (period === "monthly") {
             groupFormat = { $dateToString: { format: "%Y-%m", date: "$createdAt" } };
 
@@ -866,41 +870,72 @@ export const getDriverEarnings = async (req: any, res: any) => {
             return res.status(400).json({ message: "Invalid period" });
         }
 
-        // 🔥 AGGREGATION: Add new fields totalFare & platformFee
+        // ========================================================
+        // 🔥 AGGREGATION QUERY → Include completed + midway cancelled
+        // ========================================================
         const earnings = await Ride.aggregate([
             {
                 $match: {
                     driverId: objectId,
-                    status: "Completed",
                     createdAt: {
                         $gte: new Date(firstRideDate.setHours(0, 0, 0, 0)),
-                        $lte: new Date(now.setHours(23, 59, 59, 999))
-                    }
+                        $lte: new Date(now.setHours(23, 59, 59, 999)),
+                    },
+                    $or: [
+                        { status: "Completed" },
+                        { status: "Cancelled", "cancelDetails.platformShare": { $gt: 0 } } // Only midway cancelled
+                    ]
                 },
             },
+
+            // Normalize fields → pick completed or cancelled values
+            {
+                $addFields: {
+                    fareValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$totalFare",
+                            "$cancelDetails.totalFare"
+                        ]
+                    },
+                    driverValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$driverEarnings",
+                            "$cancelDetails.driverEarnings"
+                        ]
+                    },
+                    platformValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$platformShare",
+                            "$cancelDetails.platformShare"
+                        ]
+                    }
+                }
+            },
+
+            // Grouping
             {
                 $group: {
                     _id: groupFormat,
-                    totalFare: { $sum: "$totalFare" }, // 👈 NEW
-                    driverEarnings: { $sum: "$driverEarnings" }, // existing
-                    platformFee: { $sum: "$platformShare" }, // 👈 NEW
-                    rideCount: { $sum: 1 },
-                },
+                    totalFare: { $sum: "$fareValue" },
+                    driverEarnings: { $sum: "$driverValue" },
+                    platformFee: { $sum: "$platformValue" },
+                    rideCount: { $sum: 1 }
+                }
             },
+
             { $sort: { _id: 1 } },
         ]);
 
         const earningsMap = new Map(earnings.map((e) => [e._id, e]));
 
-        // FINAL CHART DATA
+        // Build chart data
         const chartData = labels.map((label) => {
             const data = earningsMap.get(label) || {};
-
             return {
-                label:
-                    period === "weekly"
-                        ? "W" + label
-                        : label,
+                label: period === "weekly" ? "W" + label : label,
                 totalFare: data.totalFare || 0,
                 driverEarnings: data.driverEarnings || 0,
                 platformFee: data.platformFee || 0,
@@ -908,7 +943,7 @@ export const getDriverEarnings = async (req: any, res: any) => {
             };
         });
 
-        // SUM TOTALS
+        // Totals
         const totalFare = chartData.reduce((sum, e) => sum + e.totalFare, 0);
         const totalDriver = chartData.reduce((sum, e) => sum + e.driverEarnings, 0);
         const totalPlatform = chartData.reduce((sum, e) => sum + e.platformFee, 0);
@@ -924,11 +959,13 @@ export const getDriverEarnings = async (req: any, res: any) => {
             rideCount,
             chartData,
         });
+
     } catch (err) {
         console.error("Error fetching earnings:", err);
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 
 
 // Helper: ISO week number
