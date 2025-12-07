@@ -299,8 +299,8 @@ const complaintSchema = new Schema(
       enum: [
         "Ride Issue",
         "Payment Issue",
-        "Driver Behavior",
-        "Customer Behavior",
+        "Driver Behaviour",
+        "Customer Behaviour",
         "App Issue",
         "Other",
       ],
