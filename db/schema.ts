@@ -95,7 +95,7 @@ const driverSchema = new Schema({
     osBuildId: { type: String, default: null },
   },
 
-  vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv"] },
+  vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv","Auto"] },
   registration_number: { type: String, unique: true },
   registration_date: Date,
   driving_license: String,
