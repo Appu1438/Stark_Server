@@ -17,21 +17,31 @@ export const createOrder = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Amount and Driver ID required" });
     }
 
-    // 🚨 Check first recharge requirement BEFORE creating order
+    // 🟡 1. Get driver details
+    const Driver = await driver.findById(driverId);
+
+    if (!Driver) {
+      return res.status(404).json({ message: "Driver not found" });
+    }
+
+    // Minimum recharge based on vehicle type
+    const minRecharge =
+      Driver.vehicle_type === "Auto" ? 500 : 2000;
+
+    // 🟡 2. Check wallet for first recharge
     const driverWallet = await DriverWallet.findOne({ driverId });
 
-    // Driver has no wallet entry → first recharge
     const isFirstRecharge =
       !driverWallet || !driverWallet.history || driverWallet.history.length === 0;
 
-    if (isFirstRecharge && amount < 2000) {
+    if (isFirstRecharge && amount < minRecharge) {
       return res.status(400).json({
         success: false,
-        message: "Your first wallet recharge must be ₹2000 or more.",
+        message: `Your first wallet recharge must be ₹${minRecharge} or more.`,
       });
     }
 
-    // ✔ VALID AMOUNT → create payment intent now
+    // 🟢 3. Create Razorpay order
     const options = {
       amount: amount * 100,
       currency: "INR",
@@ -51,7 +61,6 @@ export const createOrder = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Order creation failed", error });
   }
 };
-
 
 // ✅ Verify Payment (CREATE TRANSACTION ONLY ON SUCCESS)
 export const verifyPayment = async (req: Request, res: Response) => {

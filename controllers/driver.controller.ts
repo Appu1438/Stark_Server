@@ -395,19 +395,66 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
                 expiresIn: "5m",
             }
         );
+        const logoUrl = "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+
+        // --- EMAIL TEMPLATE ---
+        const emailTemplate = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Verify your email</title>
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+          .container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 40px; margin-bottom: 40px; }
+          .header { padding: 30px 40px; text-align: center; background-color: #000000; }
+          .logo { max-height: 40px; }
+          .content { padding: 40px; color: #333333; line-height: 1.6; }
+          .otp-block { background-color: #f0f2f5; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; border: 1px dashed #ccc; }
+          .otp-code { font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #000000; margin: 0; }
+          .footer { background-color: #f9f9f9; padding: 20px 40px; text-align: center; font-size: 12px; color: #888888; border-top: 1px solid #eeeeee; }
+          .footer a { color: #888888; text-decoration: underline; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+             <img src="${logoUrl}" alt="Stark Logo" class="logo" style="display:block; margin:auto;" /> 
+          </div>
+
+          <div class="content">
+            <h2 style="margin-top: 0; font-weight: 600; color: #111;">Verify your email address</h2>
+            <p>Hi ${name},</p>
+            <p>Thank you for joining <strong>Stark</strong>. To complete your registration, please verify your email address by entering the code below:</p>
+            
+            <div class="otp-block">
+              <p class="otp-code">${otp}</p>
+            </div>
+
+            <p style="font-size: 14px; color: #666;">This OTP is valid for <strong>5 minutes</strong>. If you did not request this verification, please disregard this email.</p>
+            
+            <p style="margin-top: 30px;">Best regards,<br><strong>The Stark Team</strong></p>
+          </div>
+
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.</p>
+            <p>This is an automated message, please do not reply.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
         try {
             await nylas.messages.send({
                 identifier: process.env.USER_GRANT_ID!,
                 requestBody: {
-                    to: [{ name: name, email: email }],
-                    subject: "Verify your email address!",
-                    body: `
-            <p>Hi ${name},</p>
-        <p>Your Stark verification code is ${otp}. If you didn't request for this OTP, please ignore this email!</p>
-        <p>Thanks,<br>Stark Team</p>
-            `,
+                    to: [{ name, email }],
+                    subject: "Verify your email address - Stark",
+                    body: emailTemplate,
                 },
             });
+
             res.status(201).json({
                 success: true,
                 token,
@@ -785,120 +832,120 @@ export const getAllRides = async (req: any, res: Response) => {
 };
 
 export const getDriverEarnings = async (req, res) => {
-  try {
-    const driverId = req.driver?.id;
-    const { period } = req.query;
+    try {
+        const driverId = req.driver?.id;
+        const { period } = req.query;
 
-    if (!driverId) {
-      return res.status(400).json({ message: "Driver ID required" });
+        if (!driverId) {
+            return res.status(400).json({ message: "Driver ID required" });
+        }
+
+        const objectId = new mongoose.Types.ObjectId(driverId);
+
+        const now = new Date();
+
+        // Choose group format
+        let groupFormat;
+        if (period === "daily") {
+            groupFormat = { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } };
+        } else if (period === "weekly") {
+            groupFormat = {
+                $concat: [
+                    { $toString: { $isoWeek: "$createdAt" } },
+                    "-",
+                    { $toString: { $year: "$createdAt" } }
+                ]
+            };
+        } else if (period === "monthly") {
+            groupFormat = { $dateToString: { format: "%Y-%m", date: "$createdAt" } };
+        } else {
+            return res.status(400).json({ message: "Invalid period" });
+        }
+
+        // 1️⃣ Fetch aggregated data
+        const earnings = await Ride.aggregate([
+            {
+                $match: {
+                    driverId: objectId,
+                    $or: [
+                        { status: "Completed" },
+                        { status: "Cancelled", "cancelDetails.platformShare": { $gt: 0 } }
+                    ]
+                }
+            },
+
+            {
+                $addFields: {
+                    fareValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$totalFare",
+                            "$cancelDetails.totalFare"
+                        ]
+                    },
+                    driverValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$driverEarnings",
+                            "$cancelDetails.driverEarnings"
+                        ]
+                    },
+                    platformValue: {
+                        $cond: [
+                            { $eq: ["$status", "Completed"] },
+                            "$platformShare",
+                            "$cancelDetails.platformShare"
+                        ]
+                    }
+                }
+            },
+
+            {
+                $group: {
+                    _id: groupFormat,
+                    totalFare: { $sum: "$fareValue" },
+                    driverEarnings: { $sum: "$driverValue" },
+                    platformFee: { $sum: "$platformValue" },
+                    rideCount: { $sum: 1 }
+                }
+            },
+
+            { $sort: { _id: 1 } }
+        ]);
+
+        // 2️⃣ Extract available keys from DB
+        const keys = earnings.map(e => e._id);
+
+        // 3️⃣ Generate clean chartData
+        const chartData = earnings.map(item => ({
+            label: period === "weekly" ? "W" + item._id : item._id,
+            totalFare: item.totalFare,
+            driverEarnings: item.driverEarnings,
+            platformFee: item.platformFee,
+            rideCount: item.rideCount,
+        }));
+
+        // 4️⃣ Compute totals
+        const totalFare = chartData.reduce((a, b) => a + b.totalFare, 0);
+        const totalDriver = chartData.reduce((a, b) => a + b.driverEarnings, 0);
+        const totalPlatform = chartData.reduce((a, b) => a + b.platformFee, 0);
+        const rideCount = chartData.reduce((a, b) => a + b.rideCount, 0);
+
+        res.json({
+            period,
+            from: keys.length > 0 ? keys[0] : null,
+            to: now,
+            totalFare,
+            driverEarnings: totalDriver,
+            platformFee: totalPlatform,
+            rideCount,
+            chartData
+        });
+
+    } catch (err) {
+        console.error("Earnings error:", err);
+        res.status(500).json({ message: "Internal Server Error" });
     }
-
-    const objectId = new mongoose.Types.ObjectId(driverId);
-
-    const now = new Date();
-
-    // Choose group format
-    let groupFormat;
-    if (period === "daily") {
-      groupFormat = { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } };
-    } else if (period === "weekly") {
-      groupFormat = {
-        $concat: [
-          { $toString: { $isoWeek: "$createdAt" } },
-          "-",
-          { $toString: { $year: "$createdAt" } }
-        ]
-      };
-    } else if (period === "monthly") {
-      groupFormat = { $dateToString: { format: "%Y-%m", date: "$createdAt" } };
-    } else {
-      return res.status(400).json({ message: "Invalid period" });
-    }
-
-    // 1️⃣ Fetch aggregated data
-    const earnings = await Ride.aggregate([
-      {
-        $match: {
-          driverId: objectId,
-          $or: [
-            { status: "Completed" },
-            { status: "Cancelled", "cancelDetails.platformShare": { $gt: 0 } }
-          ]
-        }
-      },
-
-      {
-        $addFields: {
-          fareValue: {
-            $cond: [
-              { $eq: ["$status", "Completed"] },
-              "$totalFare",
-              "$cancelDetails.totalFare"
-            ]
-          },
-          driverValue: {
-            $cond: [
-              { $eq: ["$status", "Completed"] },
-              "$driverEarnings",
-              "$cancelDetails.driverEarnings"
-            ]
-          },
-          platformValue: {
-            $cond: [
-              { $eq: ["$status", "Completed"] },
-              "$platformShare",
-              "$cancelDetails.platformShare"
-            ]
-          }
-        }
-      },
-
-      {
-        $group: {
-          _id: groupFormat,
-          totalFare: { $sum: "$fareValue" },
-          driverEarnings: { $sum: "$driverValue" },
-          platformFee: { $sum: "$platformValue" },
-          rideCount: { $sum: 1 }
-        }
-      },
-
-      { $sort: { _id: 1 } }
-    ]);
-
-    // 2️⃣ Extract available keys from DB
-    const keys = earnings.map(e => e._id);
-
-    // 3️⃣ Generate clean chartData
-    const chartData = earnings.map(item => ({
-      label: period === "weekly" ? "W" + item._id : item._id,
-      totalFare: item.totalFare,
-      driverEarnings: item.driverEarnings,
-      platformFee: item.platformFee,
-      rideCount: item.rideCount,
-    }));
-
-    // 4️⃣ Compute totals
-    const totalFare = chartData.reduce((a, b) => a + b.totalFare, 0);
-    const totalDriver = chartData.reduce((a, b) => a + b.driverEarnings, 0);
-    const totalPlatform = chartData.reduce((a, b) => a + b.platformFee, 0);
-    const rideCount = chartData.reduce((a, b) => a + b.rideCount, 0);
-
-    res.json({
-      period,
-      from: keys.length > 0 ? keys[0] : null,
-      to: now,
-      totalFare,
-      driverEarnings: totalDriver,
-      platformFee: totalPlatform,
-      rideCount,
-      chartData
-    });
-
-  } catch (err) {
-    console.error("Earnings error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
 };
 
 

@@ -86,7 +86,7 @@ const driverSchema = new Schema({
   dob: Date,
   gender: { type: String, enum: ["Male", "Female", "Other"] },
 
-  notificationToken: String,
+  notificationToken: { type: String, default: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
   activeDevice: {
     fingerprint: { type: String, default: null },
     brand: { type: String, default: null },
@@ -95,7 +95,7 @@ const driverSchema = new Schema({
     osBuildId: { type: String, default: null },
   },
 
-  vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv","Auto"] },
+  vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv", "Auto"] },
   registration_number: { type: String, unique: true },
   registration_date: Date,
   driving_license: String,
@@ -109,8 +109,8 @@ const driverSchema = new Schema({
   lastActive: {
     type: Date,
     default: Date.now,
-  }, 
-    
+  },
+
   is_approved: { type: Boolean, default: true },
   pending_suspension: { type: Boolean, default: false },
 
@@ -187,7 +187,7 @@ const userSchema = new Schema({
   name: String,
   phone_number: { type: String, unique: true },
   email: { type: String, unique: true },
-  notificationToken: String,
+  notificationToken: { type: String, default: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
 
   is_approved: { type: Boolean, default: true },
 
@@ -209,7 +209,7 @@ const userSchema = new Schema({
   totalRides: { type: Number, default: 0 },
   pendingRides: { type: Number, default: 0 },
   cancelRides: { type: Number, default: 0 },
-  
+
 }, { timestamps: true });
 
 const transactionSchema = new Schema(
