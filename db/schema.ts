@@ -258,14 +258,21 @@ const driverWalletSchema = new Schema(
 );
 
 const fareSchema = new Schema({
-  vehicle_type: { type: String, enum: ["Auto", "Hatchback", "Sedan", "Suv"], required: true },
-  baseFare: { type: Number, default: 0 },
-  perKmRate: { type: Number, default: 0 },
-  perMinRate: { type: Number, default: 0 },
-  minFare: { type: Number, default: 0 },
-  surgeMultiplier: { type: Number, default: 1 }, // optional: for dynamic pricing
+  vehicle_type: {
+    type: String,
+    enum: ["Auto", "Hatchback", "Sedan", "Suv"],
+    required: true
+  },
 
-  district: { type: String, default: 'Default' }, // mark if this fare set is active
+  baseFare: { type: Number, default: 0 },        // Also used as minFare
+  baseFareUptoKm: { type: Number, default: 2 },  // e.g., 2km or 5km
+
+  perKmRate: { type: Number, default: 0 },       // charge for extra km
+  perMinRate: { type: Number, default: 0 },       // charge for waiting min
+
+  surgeMultiplier: { type: Number, default: 1 },
+
+  district: { type: String, default: "Default" },
 }, { timestamps: true });
 
 

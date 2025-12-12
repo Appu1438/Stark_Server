@@ -3,49 +3,67 @@ import { Fare } from "../db/schema";
 
 export const calculateFare = async (req: Request, res: Response) => {
   try {
-    console.log(req.body)
     const { vehicle_type, distance, district } = req.body;
 
-    if (!vehicle_type || distance === undefined || distance === null) {
-      console.log("Vehicle type and distance are required");
+    if (!vehicle_type || distance == null) {
       return res.status(400).json({ message: "Vehicle type and distance are required" });
     }
 
-
-    // 1️⃣ Fetch fare details
+    // Fetch fare config
     let fare = await Fare.findOne({ vehicle_type, district });
     if (!fare) {
-      // fallback to default district config
       fare = await Fare.findOne({ vehicle_type, district: "Default" });
       if (!fare) {
-        return res.status(404).json({ message: "Fare details not found for vehicle type" });
+        return res.status(404).json({ message: "Fare details not found" });
       }
     }
 
-    // 2️⃣ Perform calculation
-    const rawFare =
-      fare.baseFare +
-      distance * fare.perKmRate
+    // -----------------------------------------
+    // 1️⃣ Base Fare Calculation
+    // -----------------------------------------
+    let rawFare = 0;
 
+    if (distance <= fare.baseFareUptoKm) {
+      rawFare = fare.baseFare;
+    } else {
+      const extraKm = distance - fare.baseFareUptoKm;
+      rawFare = fare.baseFare + extraKm * fare.perKmRate;
+    }
 
-    const surgedFare = rawFare * fare.surgeMultiplier;
-    const totalFare = Math.max(surgedFare, fare.minFare);
+    // Apply surge
+    const baseFare = Math.round(rawFare * fare.surgeMultiplier);
 
-    const roundedFare = Math.round(totalFare);
+    // -----------------------------------------
+    // 2️⃣ TAX (5%) added to USER payment only
+    // -----------------------------------------
+    const taxAmount = Math.round(baseFare * 0.05);
+    const userPayable = baseFare + taxAmount;
 
-    // 3️⃣ Calculate platform share (15%) & driver earnings
-    const platformShare = Math.round(roundedFare * 0.15);
-    const driverEarnings = roundedFare - platformShare;
+    // -----------------------------------------
+    // 3️⃣ Platform Fee (10% of base fare)
+    // -----------------------------------------
+    const platformFee = Math.round(baseFare * 0.10);
 
-    res.status(200).json({
+    // -----------------------------------------
+    // 5️⃣ Total deductions (platform fee + tax)
+    // -----------------------------------------
+    const totalDeductions = platformFee + taxAmount;
+
+    // -----------------------------------------
+    // 6️⃣ Driver Final Earnings
+    // -----------------------------------------
+    const driverEarnings = userPayable - totalDeductions;
+
+    return res.status(200).json({
       success: true,
       data: {
-        totalFare: roundedFare,
-        platformShare,
-        driverEarnings,
-        fareDetails: fare, // sending back for reference
+        totalFare: userPayable,      // User pays this
+        platformShare: totalDeductions, // 10% + tax cut from wallet
+        driverEarnings,              // Driver receives this
+        fareDetails: fare,
       },
     });
+
   } catch (error) {
     console.error("Error calculating fare:", error);
     res.status(500).json({ message: "Error calculating fare", error });
