@@ -4,10 +4,13 @@ import { driver, DriverWallet, Fare, Ride, User } from "../db/schema";
 import { generateOtp } from "../utils/generateOtp";
 import { calculateDistance } from "../utils/calculateDistance";
 import { sendPushNotification } from "../utils/sendNotification";
+import { RideRequest } from "../db/schema";
+import mongoose from "mongoose";
 
 export const newRide = async (req: Request, res: Response) => {
     try {
         const {
+            uniqueRideKey,
             userId,
             totalFare,
             driverEarnings,
@@ -22,10 +25,71 @@ export const newRide = async (req: Request, res: Response) => {
 
         const driverId = req.driver.id;
 
+        // =================================================
+        // 1️⃣ LOCK RIDE REQUEST (pending → locked)
+        // =================================================
+        // Only ONE driver can do this successfully
+        const lockedRequest = await RideRequest.findOneAndUpdate(
+            {
+                uniqueRideKey,
+                status: "pending",
+                expiresAt: { $gt: new Date() }, // must not be expired
+            },
+            {
+                $set: {
+                    status: "locked",
+                    acceptedBy: new mongoose.Types.ObjectId(driverId),
+                },
+            },
+            { new: true }
+        );
+
+        // ❌ Could not lock → check why
+        if (!lockedRequest) {
+            const existing = await RideRequest.findOne({ uniqueRideKey });
+
+            // ⏱️ Expired
+            if (!existing || existing.expiresAt <= new Date()) {
+                return res.status(410).json({
+                    success: false,
+                    code: "REQUEST_EXPIRED",
+                    message: "Ride request expired",
+                });
+            }
+
+            // 🔒 Locked by another driver
+            if (existing.status === "locked") {
+                return res.status(423).json({
+                    success: false,
+                    code: "REQUEST_LOCKED",
+                    message: "Ride is locked by another driver",
+                });
+            }
+
+            // ✅ Already assigned
+            if (existing.status === "assigned") {
+                return res.status(409).json({
+                    success: false,
+                    code: "REQUEST_ASSIGNED",
+                    message: "Ride already assigned to another driver",
+                });
+            }
+
+            // Fallback
+            return res.status(409).json({
+                success: false,
+                code: "REQUEST_UNAVAILABLE",
+                message: "Ride unavailable",
+            });
+        }
+
+        // =================================================
+        // 2️⃣ WALLET CHECK (while locked)
+        // =================================================
         const updatedWallet = await DriverWallet.findOneAndUpdate(
             {
                 driverId,
-                balance: { $gt: 0 },
+                balance: { $gte: platformShare },
             },
             [
                 {
@@ -40,8 +104,12 @@ export const newRide = async (req: Request, res: Response) => {
                                         action: "platform_fee",
                                         amount: platformShare,
                                         referenceId: null,
-                                        meta: { rideDetails: { totalFare, distance, userId } },
-                                        balanceAfter: { $subtract: ["$balance", platformShare] },
+                                        meta: {
+                                            rideDetails: { totalFare, distance, userId },
+                                        },
+                                        balanceAfter: {
+                                            $subtract: ["$balance", platformShare],
+                                        },
                                         actionOn: new Date(),
                                     },
                                 ],
@@ -53,22 +121,35 @@ export const newRide = async (req: Request, res: Response) => {
             { new: true }
         );
 
+        // ❌ Wallet failed → RELEASE LOCK
         if (!updatedWallet) {
-            return res
-                .status(400)
-                .json({ message: "Insufficient wallet balance to start the ride" });
+            await RideRequest.updateOne(
+                { _id: lockedRequest._id },
+                { status: "pending", acceptedBy: null }
+            );
+
+            return res.status(400).json({
+                success: false,
+                code: "LOW_WALLET",
+                message: "Insufficient wallet balance",
+            });
         }
 
-        // ✅ Generate OTP
+        // =================================================
+        // 3️⃣ CREATE OTP
+        // =================================================
         const otp = await generateOtp();
 
-        // ✅ Create the ride
-        const newRide = new Ride({
+        // =================================================
+        // 4️⃣ CREATE RIDE (WINNER)
+        // =================================================
+        const newRide = await Ride.create({
+            uniqueRideKey,
             userId,
             driverId,
-            totalFare: parseFloat(totalFare),
-            driverEarnings: parseFloat(driverEarnings),
-            platformShare: parseFloat(platformShare),
+            totalFare: Number(totalFare),
+            driverEarnings: Number(driverEarnings),
+            platformShare: Number(platformShare),
             status,
             currentLocationName,
             currentLocation,
@@ -78,17 +159,12 @@ export const newRide = async (req: Request, res: Response) => {
             otp,
         });
 
-        await newRide.save();
-
-        // ✅ Update wallet history with rideId reference
-        await DriverWallet.updateOne(
-            { driverId },
-            {
-                $set: {
-                    "history.$[elem].referenceId": newRide._id,
-                },
-            },
-            { arrayFilters: [{ "elem.action": "platform_fee", "elem.referenceId": null }] }
+        // =================================================
+        // 5️⃣ FINALIZE REQUEST (locked → assigned)
+        // =================================================
+        await RideRequest.updateOne(
+            { _id: lockedRequest._id },
+            { status: "assigned" }
         );
 
         await driver.findByIdAndUpdate(driverId, {
@@ -99,17 +175,21 @@ export const newRide = async (req: Request, res: Response) => {
             $inc: { pendingRides: 1 },
         });
 
-        res.status(201).json({
+        // =================================================
+        // 6️⃣ SUCCESS RESPONSE
+        // =================================================
+        return res.status(201).json({
             success: true,
             newRide: {
                 id: newRide._id,
+                uniqueRideKey,
                 userId: newRide.userId,
                 driverId: newRide.driverId,
                 totalFare: newRide.totalFare,
                 driverEarnings: newRide.driverEarnings,
                 platformShare: newRide.platformShare,
                 status: newRide.status,
-                otp: newRide.otp, // include OTP in response (optional)
+                otp: newRide.otp,
                 currentLocationName: newRide.currentLocationName,
                 destinationLocationName: newRide.destinationLocationName,
                 distance: newRide.distance,
@@ -118,11 +198,27 @@ export const newRide = async (req: Request, res: Response) => {
             },
             walletBalance: updatedWallet.balance,
         });
-    } catch (error) {
+
+    } catch (error: any) {
         console.error("New Ride Error:", error);
-        res.status(500).json({ message: "Internal server error", error });
+
+        // 🧨 Unique ride key conflict (extreme edge case)
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                code: "REQUEST_ASSIGNED",
+                message: "Ride already assigned",
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
     }
 };
+
+
 
 export const verifyRideOtp = async (req: Request, res: Response) => {
     try {

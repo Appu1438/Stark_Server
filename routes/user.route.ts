@@ -1,7 +1,9 @@
 import express from "express";
 import {
   checkActiveRide,
+  createRideRequest,
   deletedSavedPlaces,
+  expireRideRequest,
   findRideById,
   getAllRides,
   getLoggedInUserData,
@@ -38,6 +40,10 @@ userRouter.put("/update-push-token", isAuthenticated, checkUserApproval, updateU
 
 
 userRouter.get("/check-active-ride", isAuthenticated, checkUserApproval, checkActiveRide);
+
+userRouter.post("/ride-request/create", isAuthenticated, checkUserApproval, createRideRequest);
+
+userRouter.post("/ride-request/expire", isAuthenticated, checkUserApproval, expireRideRequest);
 
 userRouter.get("/get-rides", isAuthenticated, checkUserApproval, getAllRides);
 

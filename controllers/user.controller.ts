@@ -4,7 +4,8 @@ import twilio from "twilio";
 import jwt from "jsonwebtoken";
 import { nylas } from "../app";
 import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
-import { Fare, Ride, User } from "../db/schema";
+import { Fare, Ride, RideRequest, User } from "../db/schema";
+import mongoose from "mongoose";
 
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -396,6 +397,112 @@ export const checkActiveRide = async (req: any, res: Response) => {
 
   } catch (error) {
     console.error("Error checking user active ride:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+export const createRideRequest = async (req: Request, res: Response) => {
+  try {
+    const {
+      uniqueRideKey,
+    } = req.body;
+
+    const userId = req.user?.id;
+
+
+    if (!uniqueRideKey || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: "uniqueRideKey and userId are required",
+      });
+    }
+
+    // -------------------------------------------------
+    // 🚨 2. CHECK EXISTING ACTIVE RIDE REQUEST
+    // -------------------------------------------------
+    const existingRequest = await RideRequest.findOne({
+      userId,
+      status: { $in: ["pending", "locked"] }, // 🔥 IMPORTANT
+      expiresAt: { $gt: new Date() },         // 🔥 NOT EXPIRED
+    });
+
+
+    if (existingRequest) {
+      return res.status(409).json({
+        success: false,
+        message: "Ride request already in progress",
+        uniqueRideKey: existingRequest.uniqueRideKey,
+      });
+    }
+
+    // -------------------------------------------------
+    // 🚀 3. CREATE NEW RIDE REQUEST (TTL BASED)
+    // -------------------------------------------------
+    await RideRequest.create({
+      uniqueRideKey,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000), // 60 seconds
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Ride request created",
+      uniqueRideKey,
+      expiresIn: 60, // seconds
+    });
+
+  } catch (error: any) {
+    console.error("Create RideRequest Error:", error);
+
+    // -------------------------------------------------
+    // 🚨 DUPLICATE KEY (SAME uniqueRideKey)
+    // -------------------------------------------------
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Ride request already exists",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+export const expireRideRequest = async (req: Request, res: Response) => {
+  try {
+    const { uniqueRideKey, userId } = req.body;
+
+    if (!uniqueRideKey || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: "uniqueRideKey and userId required",
+      });
+    }
+
+    await RideRequest.updateOne(
+      {
+        uniqueRideKey,
+        userId,
+        status: "pending",
+      },
+      {
+        $set: { status: "expired" },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: "Ride request expired",
+    });
+  } catch (error) {
+    console.error("Expire RideRequest Error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
