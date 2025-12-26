@@ -89,7 +89,21 @@ export const logout = async (req: Request, res: Response) => {
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const { phone_number } = req.body;
-    console.log('user', phone_number)
+    console.log("user", phone_number);
+
+    // 🔥 PLAY STORE REVIEW MODE — SKIP TWILIO
+    if (
+      process.env.REVIEW_MODE === "true" &&
+      phone_number === process.env.REVIEW_PHONE
+    ) {
+      return res.status(200).json({
+        success: true,
+        message: "OTP sent (review mode)",
+        reviewMode: true,
+      });
+    }
+
+    // 🔒 NORMAL OTP FLOW
     await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID!)
       .verifications.create({
@@ -110,6 +124,49 @@ export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { phone_number, otp } = req.body;
 
+    // 🔥 PLAY STORE REVIEW MODE (STATIC OTP)
+    if (
+      process.env.REVIEW_MODE === "true" &&
+      phone_number === process.env.REVIEW_PHONE &&
+      otp === process.env.REVIEW_STATIC_OTP
+    ) {
+      let existingUser = await User.findOne({ phone_number });
+
+      if (!existingUser) {
+        existingUser = await User.create({ phone_number });
+      }
+
+      if (!existingUser.is_approved) {
+        return res.status(403).json({
+          success: false,
+          message: "Your account is suspended. please contact support.",
+        });
+      }
+
+      const userData = existingUser.toObject();
+      userData.id = userData._id;
+      delete userData._id;
+
+      const accessToken = generateAccessToken(userData.id);
+      const refreshToken = generateRefreshToken(userData.id);
+
+      res.cookie("userRefreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+
+      return res.status(200).json({
+        success: true,
+        accessToken,
+        user: userData,
+        reviewMode: true,
+      });
+    }
+
+    // 🔒 NORMAL OTP FLOW (Twilio)
     await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID!)
       .verificationChecks.create({
@@ -120,8 +177,6 @@ export const verifyOtp = async (req: Request, res: Response) => {
     let existingUser = await User.findOne({ phone_number });
 
     if (existingUser) {
-
-      // Step 2: Check if approved
       if (!existingUser.is_approved) {
         return res.status(403).json({
           success: false,
@@ -129,25 +184,22 @@ export const verifyOtp = async (req: Request, res: Response) => {
         });
       }
 
-      // Convert MongoDB _id -> id
       const userData = existingUser.toObject();
       userData.id = userData._id;
       delete userData._id;
 
-
-      // await sendToken(userData, res);
-      const accessToken = generateAccessToken(userData.id)
-      const refreshToken = generateRefreshToken(userData.id)
+      const accessToken = generateAccessToken(userData.id);
+      const refreshToken = generateRefreshToken(userData.id);
 
       res.cookie("userRefreshToken", refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production", // only over HTTPS in production
+        secure: process.env.NODE_ENV === "production",
         sameSite: "strict",
         path: "/",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: 30 * 24 * 60 * 60 * 1000,
       });
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         accessToken,
         user: userData,
@@ -156,12 +208,11 @@ export const verifyOtp = async (req: Request, res: Response) => {
       const newUser = new User({ phone_number });
       await newUser.save();
 
-      // Convert MongoDB _id -> id
       const userData = newUser.toObject();
       userData.id = userData._id;
       delete userData._id;
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         message: "OTP verified successfully!",
         user: userData,
@@ -169,12 +220,13 @@ export const verifyOtp = async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
-      message: "Something went wrong!",
+      message: "Invalid OTP",
     });
   }
 };
+
 
 
 export const sendingOtpToEmail = async (req: Request, res: Response) => {
