@@ -10,7 +10,7 @@ paymentRouter.post('/create-order', isAuthenticatedDriver, checkDriverDevice, ch
 paymentRouter.post('/verify-payment', isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, verifyPayment)
 
 paymentRouter.post("/create-payment-link", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, createPaymentLink)
-paymentRouter.post('/webhook', isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, razorpayWebhook)
+paymentRouter.post('/webhook', razorpayWebhook)
 
 
 export default paymentRouter;
