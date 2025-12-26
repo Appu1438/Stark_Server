@@ -25,6 +25,11 @@ app.use(express.json({ limit: "50mb" }));
 // cookie parserv
 app.use(cookieParser());
 
+app.use(
+  "/api/v1/payments/webhook",
+  express.raw({ type: "application/json" })
+);
+
 // enable cors
 app.use(cors({
   origin: [

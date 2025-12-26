@@ -1,6 +1,7 @@
 import Razorpay from "razorpay";
 import { driver, DriverWallet, Transaction } from "../db/schema";
 import { Request, Response } from "express";
+import crypto from "crypto";
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID!,
@@ -165,4 +166,93 @@ export const verifyPayment = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Payment verification failed" });
   }
 };
+
+
+export const createPaymentLink = async (req: Request, res: Response) => {
+  try {
+    const { amount, driver } = req.body;
+
+    if (!amount || !driver?.id) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const fee = amount * 0.02;
+    const gst = fee * 0.18;
+    const grossAmount = Math.round((amount + fee + gst) * 100);
+
+    const paymentLink = await razorpay.paymentLink.create({
+      amount: grossAmount,
+      currency: "INR",
+      description: "Wallet Recharge",
+      customer: {
+        name: driver.name,
+        email: driver.email,
+        contact: driver.phone_number,
+      },
+      notes: {
+        driverId: driver.id,
+        netAmount: amount,
+      },
+    });
+
+    res.json({
+      url: paymentLink.short_url,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Payment link creation failed" });
+  }
+};
+
+
+export const razorpayWebhook = async (req: Request, res: Response) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+
+  const shasum = crypto.createHmac("sha256", secret);
+  shasum.update(JSON.stringify(req.body));
+  const digest = shasum.digest("hex");
+
+  if (digest !== req.headers["x-razorpay-signature"]) {
+    return res.status(400).send("Invalid signature");
+  }
+
+  const event = req.body.event;
+
+  if (event === "payment.captured") {
+    const payment = req.body.payload.payment.entity;
+    const driverId = payment.notes.driverId;
+    const netAmount = Number(payment.notes.netAmount);
+
+    const existing = await Transaction.findOne({ paymentId: payment.id });
+    if (existing) return res.json({ status: "duplicate" });
+
+    await DriverWallet.findOneAndUpdate(
+      { driverId },
+      {
+        $inc: { balance: netAmount },
+        $push: {
+          history: {
+            type: "credit",
+            action: "recharge",
+            amount: netAmount,
+            referenceId: payment.id,
+            actionOn: new Date(),
+          },
+        },
+      },
+      { upsert: true }
+    );
+
+    await Transaction.create({
+      driverId,
+      grossAmount: payment.amount / 100,
+      netAmount,
+      paymentId: payment.id,
+      status: "success",
+    });
+  }
+
+  res.json({ status: "ok" });
+};
+
 
