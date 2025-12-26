@@ -5,6 +5,7 @@ import { calculateFare, createFare, getFareByVehicleType, getFares, updateFare }
 import { checkDriverDevice } from "../middleware/checkDevice";
 import { isActiveAdmin } from "../middleware/checkAdminStatus";
 import { checkAdminRole } from "../middleware/checkAdminRole";
+import { checkDriverApproval } from "../middleware/checkDriverApproval";
 
 const fareRouter = express.Router();
 
@@ -12,7 +13,7 @@ const fareRouter = express.Router();
 fareRouter.post('/calculate-fare', isAuthenticated, calculateFare)
 
 //get fare by vehicle type and district
-fareRouter.get('/:vehicle_type/:district', isAuthenticatedDriver, checkDriverDevice, getFareByVehicleType)
+fareRouter.get('/:vehicle_type/:district', isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getFareByVehicleType)
 
 //create or update fare details
 fareRouter.post('/create-fare', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(["SuperAdmin", "Admin"]), createFare)

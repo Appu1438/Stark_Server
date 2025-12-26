@@ -170,27 +170,32 @@ export const verifyPayment = async (req: Request, res: Response) => {
 
 export const createPaymentLink = async (req: Request, res: Response) => {
   try {
-    const { amount, driver } = req.body;
+    const { amount } = req.body;
+    const driverId = req.driver?.id
+    console.log(amount, driverId)
 
-    if (!amount || !driver?.id) {
+    if (!amount || !driverId) {
+      console.log('400')
       return res.status(400).json({ message: "Invalid request" });
     }
 
     const fee = amount * 0.02;
     const gst = fee * 0.18;
     const grossAmount = Math.round((amount + fee + gst) * 100);
+    const Driver = await driver.findById(driverId);
+
 
     const paymentLink = await razorpay.paymentLink.create({
       amount: grossAmount,
       currency: "INR",
       description: "Wallet Recharge",
       customer: {
-        name: driver.name,
-        email: driver.email,
-        contact: driver.phone_number,
+        name: Driver?.name,
+        email: Driver?.email,
+        contact: Driver?.phone_number,
       },
       notes: {
-        driverId: driver.id,
+        driverId: driverId,
         netAmount: amount,
       },
     });
@@ -206,27 +211,83 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 
 
 export const razorpayWebhook = async (req: Request, res: Response) => {
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+  try {
+    console.log("🔔 Razorpay Webhook Hit");
 
-  const shasum = crypto.createHmac("sha256", secret);
-  shasum.update(JSON.stringify(req.body));
-  const digest = shasum.digest("hex");
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+    console.log("🔑 Webhook secret loaded:", !!secret);
 
-  if (digest !== req.headers["x-razorpay-signature"]) {
-    return res.status(400).send("Invalid signature");
-  }
+    // -------------------------------
+    // 1️⃣ VERIFY SIGNATURE
+    // -------------------------------
+    const receivedSignature = req.headers["x-razorpay-signature"];
+    console.log("📩 Received Signature:", receivedSignature);
 
-  const event = req.body.event;
+    const shasum = crypto.createHmac("sha256", secret);
+    shasum.update(JSON.stringify(req.body));
+    const digest = shasum.digest("hex");
 
-  if (event === "payment.captured") {
-    const payment = req.body.payload.payment.entity;
-    const driverId = payment.notes.driverId;
-    const netAmount = Number(payment.notes.netAmount);
+    console.log("🧮 Computed Digest:", digest);
 
+    if (digest !== receivedSignature) {
+      console.log("❌ Signature mismatch");
+      return res.status(400).send("Invalid signature");
+    }
+
+    console.log("✅ Signature verified");
+
+    // -------------------------------
+    // 2️⃣ EVENT CHECK
+    // -------------------------------
+    const event = req.body.event;
+    console.log("📌 Event received:", event);
+
+    if (event !== "payment.captured") {
+      console.log("ℹ️ Ignored event:", event);
+      return res.json({ status: "ignored" });
+    }
+
+    // -------------------------------
+    // 3️⃣ PAYMENT PAYLOAD
+    // -------------------------------
+    const payment = req.body.payload?.payment?.entity;
+
+    if (!payment) {
+      console.log("❌ Payment entity missing");
+      return res.status(400).json({ message: "Invalid payload" });
+    }
+
+    console.log("💰 Payment ID:", payment.id);
+    console.log("💵 Gross Amount (paise):", payment.amount);
+    console.log("📝 Notes:", payment.notes);
+
+    const driverId = payment.notes?.driverId;
+    const netAmount = Number(payment.notes?.netAmount);
+
+    console.log("👤 Driver ID:", driverId);
+    console.log("💸 Net Amount:", netAmount);
+
+    if (!driverId || !netAmount) {
+      console.log("❌ Missing driverId or netAmount");
+      return res.status(400).json({ message: "Missing notes data" });
+    }
+
+    // -------------------------------
+    // 4️⃣ DUPLICATE CHECK
+    // -------------------------------
     const existing = await Transaction.findOne({ paymentId: payment.id });
-    if (existing) return res.json({ status: "duplicate" });
 
-    await DriverWallet.findOneAndUpdate(
+    if (existing) {
+      console.log("⚠️ Duplicate payment detected:", payment.id);
+      return res.json({ status: "duplicate" });
+    }
+
+    console.log("🆕 New payment, updating wallet");
+
+    // -------------------------------
+    // 5️⃣ WALLET UPDATE
+    // -------------------------------
+    const walletUpdate = await DriverWallet.findOneAndUpdate(
       { driverId },
       {
         $inc: { balance: netAmount },
@@ -240,19 +301,28 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
           },
         },
       },
-      { upsert: true }
+      { upsert: true, new: true }
     );
 
-    await Transaction.create({
+    console.log("✅ Wallet updated:", walletUpdate);
+
+    // -------------------------------
+    // 6️⃣ TRANSACTION LOG
+    // -------------------------------
+    const tx = await Transaction.create({
       driverId,
       grossAmount: payment.amount / 100,
       netAmount,
       paymentId: payment.id,
       status: "success",
     });
+
+    console.log("📄 Transaction saved:", tx._id);
+
+    return res.json({ status: "ok" });
+
+  } catch (error) {
+    console.error("🔥 Webhook error:", error);
+    return res.status(500).json({ message: "Webhook failed" });
   }
-
-  res.json({ status: "ok" });
 };
-
-
