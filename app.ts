@@ -19,11 +19,11 @@ export const nylas = new Nylas({
   apiUri: "https://api.us.nylas.com",
 });
 
+
+app.use("/api/v1/payments", paymentRouter);
+
+
 // body parser
-app.use(
-  "/api/v1/payments/webhook",
-  express.raw({ type: "application/json" })
-);
 app.use(express.json({ limit: "50mb" }));
 
 // cookie parserv
@@ -48,7 +48,6 @@ connectDB();
 app.use("/api/v1", userRouter);
 app.use("/api/v1/driver", driverRouter);
 app.use("/api/v1/admin", adminRouter);
-app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/fare", fareRouter);
 app.use("/api/v1/ride", rideRouter);
 app.use("/api/v1/complaints", complaintRouter);
