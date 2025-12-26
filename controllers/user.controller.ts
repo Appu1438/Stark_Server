@@ -91,11 +91,8 @@ export const registerUser = async (req: Request, res: Response) => {
     const { phone_number } = req.body;
     console.log("user", phone_number);
 
-    // 🔥 PLAY STORE REVIEW MODE — SKIP TWILIO
-    if (
-      process.env.REVIEW_MODE === "true" &&
-      phone_number === process.env.REVIEW_PHONE
-    ) {
+    // 🔥 REVIEW MODE — SKIP TWILIO COMPLETELY
+    if (process.env.REVIEW_MODE === "true") {
       return res.status(200).json({
         success: true,
         message: "OTP sent (review mode)",
@@ -103,7 +100,7 @@ export const registerUser = async (req: Request, res: Response) => {
       });
     }
 
-    // 🔒 NORMAL OTP FLOW
+    // 🔒 NORMAL MODE — SEND REAL OTP
     await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID!)
       .verifications.create({
@@ -119,17 +116,21 @@ export const registerUser = async (req: Request, res: Response) => {
 };
 
 
+
 // 📌 Verify OTP & login/register
 export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { phone_number, otp } = req.body;
 
-    // 🔥 PLAY STORE REVIEW MODE (STATIC OTP)
-    if (
-      process.env.REVIEW_MODE === "true" &&
-      phone_number === process.env.REVIEW_PHONE &&
-      otp === process.env.REVIEW_STATIC_OTP
-    ) {
+    // 🔥 REVIEW MODE — STATIC OTP ONLY
+    if (process.env.REVIEW_MODE === "true") {
+      if (otp !== process.env.REVIEW_STATIC_OTP) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid OTP",
+        });
+      }
+
       let existingUser = await User.findOne({ phone_number });
 
       if (!existingUser) {
@@ -166,7 +167,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       });
     }
 
-    // 🔒 NORMAL OTP FLOW (Twilio)
+    // 🔒 NORMAL MODE — TWILIO VERIFY
     await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID!)
       .verificationChecks.create({

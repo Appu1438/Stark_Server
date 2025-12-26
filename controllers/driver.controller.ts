@@ -195,6 +195,15 @@ export const sendingOtpToPhone = async (
         const { phone_number } = req.body;
         console.log(phone_number);
 
+        // 🔥 REVIEW MODE — SKIP TWILIO
+        if (process.env.REVIEW_MODE === "true") {
+            return res.status(200).json({
+                success: true,
+                message: "OTP sent (review mode)",
+                reviewMode: true,
+            });
+        }
+
         try {
             await client.verify.v2
                 ?.services(process.env.TWILIO_SERVICE_SID!)
@@ -220,6 +229,7 @@ export const sendingOtpToPhone = async (
     }
 };
 
+
 // verifying otp for login
 export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
     try {
@@ -243,27 +253,77 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             });
         }
 
+        // 🔥 REVIEW MODE — STATIC OTP ONLY
+        if (process.env.REVIEW_MODE === "true") {
+            if (otp !== process.env.REVIEW_STATIC_OTP) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP!",
+                });
+            }
 
+            // 🔥 SAVE DEVICE INFO (SAME AS NORMAL MODE)
+            const deviceInfoHeader = req.headers["x-device-info"];
+            console.log(deviceInfoHeader);
 
-        // Step 3: Verify OTP
+            if (deviceInfoHeader) {
+                try {
+                    const deviceInfo = JSON.parse(deviceInfoHeader as string);
+
+                    Driver.activeDevice = {
+                        fingerprint: deviceInfo.fingerprint,
+                        brand: deviceInfo.brand,
+                        model: deviceInfo.model,
+                        osName: deviceInfo.osName,
+                        osBuildId: deviceInfo.osBuildId,
+                    };
+
+                    await Driver.save();
+                } catch (err) {
+                    console.error("Failed to save device info:", err);
+                }
+            }
+
+            // Step 5: generate token (UNCHANGED)
+            const accessToken = generateAccessToken(Driver._id);
+            const refreshToken = generateRefreshToken(Driver._id);
+
+            res.cookie("driverRefreshToken", refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                path: "/",
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+            });
+
+            return res.status(201).json({
+                success: true,
+                accessToken,
+                driver: Driver,
+                reviewMode: true,
+            });
+        }
+
+        // 🔒 NORMAL MODE — TWILIO VERIFY (UNCHANGED)
         const verification = await client.verify.v2
             .services(process.env.TWILIO_SERVICE_SID!)
             .verificationChecks.create({ to: phone_number, code: otp });
 
         if (verification.status !== "approved") {
-            return res.status(400).json({ success: false, message: "Invalid or expired OTP!" });
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP!",
+            });
         }
-        // Step 4: Save device info
+
+        // Step 4: Save device info (UNCHANGED)
         const deviceInfoHeader = req.headers["x-device-info"];
-        console.log(deviceInfoHeader)
+        console.log(deviceInfoHeader);
+
         if (deviceInfoHeader) {
             try {
-                // If it's sent as JSON string, parse it
-                const deviceInfo = JSON.parse(deviceInfoHeader);
-                console.log(deviceInfo)
+                const deviceInfo = JSON.parse(deviceInfoHeader as string);
 
-
-                // Update the driver's activeDevice field
                 Driver.activeDevice = {
                     fingerprint: deviceInfo.fingerprint,
                     brand: deviceInfo.brand,
@@ -277,18 +337,18 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 console.error("Failed to save device info:", err);
             }
         }
-        // Step 5: generate token
-        const accessToken = generateAccessToken(Driver._id)
-        const refreshToken = generateRefreshToken(Driver._id)
+
+        // Step 5: generate token (UNCHANGED)
+        const accessToken = generateAccessToken(Driver._id);
+        const refreshToken = generateRefreshToken(Driver._id);
 
         res.cookie("driverRefreshToken", refreshToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production", // only over HTTPS in production
+            secure: process.env.NODE_ENV === "production",
             sameSite: "strict",
             path: "/",
-            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            maxAge: 30 * 24 * 60 * 60 * 1000,
         });
-
 
         res.status(201).json({
             success: true,
@@ -297,7 +357,10 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(400).json({ success: false, message: "Something went wrong!" });
+        res.status(400).json({
+            success: false,
+            message: "Something went wrong!",
+        });
     }
 };
 
