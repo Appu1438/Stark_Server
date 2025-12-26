@@ -270,6 +270,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
                     type: "credit",
                     action: "recharge",
                     amount: netAmount,
+                    referenceId: payment.id,
                     balanceAfter: { $add: ["$balance", netAmount] },
                     actionOn: new Date(),
                   },
