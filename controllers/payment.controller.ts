@@ -213,18 +213,16 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 export const razorpayWebhook = async (req: Request, res: Response) => {
   try {
     console.log("🔔 Razorpay Webhook Hit");
+    console.log("RAW BODY BUFFER:", Buffer.isBuffer(req.body));
 
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
     console.log("🔑 Webhook secret loaded:", !!secret);
 
-    // -------------------------------
-    // 1️⃣ VERIFY SIGNATURE
-    // -------------------------------
-    const receivedSignature = req.headers["x-razorpay-signature"];
+    const receivedSignature = req.headers["x-razorpay-signature"] as string;
     console.log("📩 Received Signature:", receivedSignature);
 
     const shasum = crypto.createHmac("sha256", secret);
-    shasum.update(JSON.stringify(req.body));
+    shasum.update(req.body); // ✅ IMPORTANT FIX
     const digest = shasum.digest("hex");
 
     console.log("🧮 Computed Digest:", digest);
@@ -236,58 +234,29 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
 
     console.log("✅ Signature verified");
 
-    // -------------------------------
-    // 2️⃣ EVENT CHECK
-    // -------------------------------
-    const event = req.body.event;
+    const event = JSON.parse(req.body.toString()).event;
     console.log("📌 Event received:", event);
 
     if (event !== "payment.captured") {
-      console.log("ℹ️ Ignored event:", event);
       return res.json({ status: "ignored" });
     }
 
-    // -------------------------------
-    // 3️⃣ PAYMENT PAYLOAD
-    // -------------------------------
-    const payment = req.body.payload?.payment?.entity;
-
-    if (!payment) {
-      console.log("❌ Payment entity missing");
-      return res.status(400).json({ message: "Invalid payload" });
-    }
+    const payload = JSON.parse(req.body.toString());
+    const payment = payload.payload?.payment?.entity;
 
     console.log("💰 Payment ID:", payment.id);
-    console.log("💵 Gross Amount (paise):", payment.amount);
     console.log("📝 Notes:", payment.notes);
 
-    const driverId = payment.notes?.driverId;
-    const netAmount = Number(payment.notes?.netAmount);
+    const driverId = payment.notes.driverId;
+    const netAmount = Number(payment.notes.netAmount);
 
-    console.log("👤 Driver ID:", driverId);
-    console.log("💸 Net Amount:", netAmount);
-
-    if (!driverId || !netAmount) {
-      console.log("❌ Missing driverId or netAmount");
-      return res.status(400).json({ message: "Missing notes data" });
-    }
-
-    // -------------------------------
-    // 4️⃣ DUPLICATE CHECK
-    // -------------------------------
     const existing = await Transaction.findOne({ paymentId: payment.id });
-
     if (existing) {
-      console.log("⚠️ Duplicate payment detected:", payment.id);
+      console.log("⚠️ Duplicate payment");
       return res.json({ status: "duplicate" });
     }
 
-    console.log("🆕 New payment, updating wallet");
-
-    // -------------------------------
-    // 5️⃣ WALLET UPDATE
-    // -------------------------------
-    const walletUpdate = await DriverWallet.findOneAndUpdate(
+    await DriverWallet.findOneAndUpdate(
       { driverId },
       {
         $inc: { balance: netAmount },
@@ -301,15 +270,10 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
           },
         },
       },
-      { upsert: true, new: true }
+      { upsert: true }
     );
 
-    console.log("✅ Wallet updated:", walletUpdate);
-
-    // -------------------------------
-    // 6️⃣ TRANSACTION LOG
-    // -------------------------------
-    const tx = await Transaction.create({
+    await Transaction.create({
       driverId,
       grossAmount: payment.amount / 100,
       netAmount,
@@ -317,12 +281,12 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       status: "success",
     });
 
-    console.log("📄 Transaction saved:", tx._id);
+    console.log("✅ Wallet updated successfully");
 
     return res.json({ status: "ok" });
-
   } catch (error) {
     console.error("🔥 Webhook error:", error);
     return res.status(500).json({ message: "Webhook failed" });
   }
 };
+
