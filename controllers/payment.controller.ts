@@ -256,16 +256,12 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       return res.json({ status: "duplicate" });
     }
 
-    const wallet = await DriverWallet.findOneAndUpdate(
+    const updatedWallet = await DriverWallet.findOneAndUpdate(
       { driverId },
       [
         {
           $set: {
             balance: { $add: ["$balance", netAmount] },
-          },
-        },
-        {
-          $set: {
             history: {
               $concatArrays: [
                 "$history",
@@ -274,7 +270,6 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
                     type: "credit",
                     action: "recharge",
                     amount: netAmount,
-                    referenceId: payment.id,
                     balanceAfter: { $add: ["$balance", netAmount] },
                     actionOn: new Date(),
                   },
