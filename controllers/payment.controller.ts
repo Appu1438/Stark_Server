@@ -171,41 +171,70 @@ export const verifyPayment = async (req: Request, res: Response) => {
 export const createPaymentLink = async (req: Request, res: Response) => {
   try {
     const { amount } = req.body;
-    const driverId = req.driver?.id
-    console.log(amount, driverId)
+    const driverId = req.driver?.id;
 
     if (!amount || !driverId) {
-      console.log('400')
       return res.status(400).json({ message: "Invalid request" });
     }
 
+    // 🟡 Get driver
+    const Driver = await driver.findById(driverId);
+    if (!Driver) {
+      return res.status(404).json({ message: "Driver not found" });
+    }
+
+    // 🟡 Wallet check
+    const driverWallet = await DriverWallet.findOne({ driverId });
+    const isFirstRecharge =
+      !driverWallet || !driverWallet.history || driverWallet.history.length === 0;
+
+
+
+    const firstRechargeMin = Driver.vehicle_type === "Auto" ? 500 : 2000;
+    const minRecharge = 250;
+
+    // if (isFirstRecharge && amount < firstRechargeMin) {
+    //   return res.status(400).json({
+    //     message: `First recharge must be ₹${firstRechargeMin} or more`,
+    //   });
+    // }
+
+    // if (!isFirstRecharge) {
+    //   if (amount < minRecharge || amount % 50 !== 0) {
+    //     return res.status(400).json({
+    //       message: "Recharge must be minimum ₹250 and in multiples of ₹50",
+    //     });
+    //   }
+    // }
+
+
+    // 💰 Razorpay fee calc (same logic you already use)
     const fee = amount * 0.02;
     const gst = fee * 0.18;
     const grossAmount = Math.round((amount + fee + gst) * 100);
-    const Driver = await driver.findById(driverId);
-
 
     const paymentLink = await razorpay.paymentLink.create({
       amount: grossAmount,
       currency: "INR",
       description: "Wallet Recharge",
       customer: {
-        name: Driver?.name,
-        email: Driver?.email,
-        contact: Driver?.phone_number,
+        name: Driver.name,
+        email: Driver.email,
+        contact: Driver.phone_number,
       },
       notes: {
-        driverId: driverId,
+        driverId,
         netAmount: amount,
       },
     });
 
-    res.json({
+    return res.json({
+      success: true,
       url: paymentLink.short_url,
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Payment link creation failed" });
+  } catch (error) {
+    console.error("Payment link creation error:", error);
+    return res.status(500).json({ message: "Payment link creation failed" });
   }
 };
 
@@ -213,7 +242,6 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 export const razorpayWebhook = async (req: Request, res: Response) => {
   try {
     console.log("🔔 Razorpay Webhook Hit");
-    console.log("RAW BODY BUFFER:", Buffer.isBuffer(req.body));
 
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
     console.log("🔑 Webhook secret loaded:", !!secret);
@@ -221,8 +249,12 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
     const receivedSignature = req.headers["x-razorpay-signature"] as string;
     console.log("📩 Received Signature:", receivedSignature);
 
+    console.log("📦 Is raw body buffer:", Buffer.isBuffer(req.body));
+    console.log("📦 Raw body length:", req.body?.length);
+
+    // 🔐 SIGNATURE VERIFICATION
     const shasum = crypto.createHmac("sha256", secret);
-    shasum.update(req.body); // ✅ IMPORTANT FIX
+    shasum.update(req.body); // RAW BODY BUFFER REQUIRED
     const digest = shasum.digest("hex");
 
     console.log("🧮 Computed Digest:", digest);
@@ -234,28 +266,46 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
 
     console.log("✅ Signature verified");
 
-    const event = JSON.parse(req.body.toString()).event;
+    const payload = JSON.parse(req.body.toString());
+    const event = payload.event;
+
     console.log("📌 Event received:", event);
 
     if (event !== "payment.captured") {
+      console.log("⏭️ Event ignored");
       return res.json({ status: "ignored" });
     }
 
-    const payload = JSON.parse(req.body.toString());
-    const payment = payload.payload?.payment?.entity;
+    const payment = payload.payload.payment.entity;
 
-    console.log("💰 Payment ID:", payment.id);
-    console.log("📝 Notes:", payment.notes);
+    console.log("💳 Payment Entity:", {
+      id: payment.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: payment.status,
+    });
+
+    console.log("📝 Payment:", payment);
 
     const driverId = payment.notes.driverId;
     const netAmount = Number(payment.notes.netAmount);
 
-    const existing = await Transaction.findOne({ paymentId: payment.id });
-    if (existing) {
-      console.log("⚠️ Duplicate payment");
+    console.log("👤 Driver ID:", driverId);
+    console.log("💰 Net Amount:", netAmount);
+
+    // 🔒 DUPLICATE SAFETY
+    const existingTx = await Transaction.findOne({
+      paymentId: payment.id,
+    });
+
+    if (existingTx) {
+      console.log("⚠️ Duplicate payment detected:", payment.id);
       return res.json({ status: "duplicate" });
     }
 
+    console.log("🧾 No duplicate transaction found, proceeding");
+
+    // ✅ ATOMIC WALLET UPDATE
     const updatedWallet = await DriverWallet.findOneAndUpdate(
       { driverId },
       [
@@ -283,6 +333,9 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       { upsert: true, new: true }
     );
 
+    console.log("💼 Wallet updated:", {
+      newBalance: updatedWallet?.balance,
+    });
 
     await Transaction.create({
       driverId,
@@ -292,9 +345,13 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       status: "success",
     });
 
-    console.log("✅ Wallet updated successfully");
+    console.log("✅ Transaction stored successfully");
+    console.log("🎉 Wallet recharge completed");
 
-    return res.json({ status: "ok" });
+    return res.json({
+      status: "ok",
+      wallet: updatedWallet?.balance,
+    });
   } catch (error) {
     console.error("🔥 Webhook error:", error);
     return res.status(500).json({ message: "Webhook failed" });
