@@ -171,7 +171,8 @@ export const verifyPayment = async (req: Request, res: Response) => {
 export const createPaymentLink = async (req: Request, res: Response) => {
   try {
     const { amount } = req.body;
-    const driverId = req.driver?.id;
+    console.log(amount)
+    const driverId = req?.driver?.id;
 
     if (!amount || !driverId) {
       return res.status(400).json({ message: "Invalid request" });
@@ -213,20 +214,26 @@ export const createPaymentLink = async (req: Request, res: Response) => {
     const gst = fee * 0.18;
     const grossAmount = Math.round((amount + fee + gst) * 100);
 
+    const name = Driver.name
+    const email = Driver.email
+    const contact = Driver.phone_number
+
+    console.log(name, email, contact)
+
     const paymentLink = await razorpay.paymentLink.create({
       amount: grossAmount,
       currency: "INR",
       description: "Wallet Recharge",
       customer: {
-        name: Driver.name!,
-        email: Driver.email!,
-        contact: Driver.phone_number!,
+        name: name!,
+        email: email!,
+        contact: contact!
       },
       notes: {
         driverId,
-        name: Driver.name!,
-        email: Driver.email!,
-        contact: Driver.phone_number!,
+        name: name!,
+        email: email!,
+        contact: contact!,
         netAmount: amount,
       },
     });
@@ -288,7 +295,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       status: payment.status,
     });
 
-    console.log("📝 Payment:", payment);
+    console.log("📝 Payment:", payment.notes);
 
     const driverId = payment.notes.driverId;
     const netAmount = Number(payment.notes.netAmount);
