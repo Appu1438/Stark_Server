@@ -218,12 +218,15 @@ export const createPaymentLink = async (req: Request, res: Response) => {
       currency: "INR",
       description: "Wallet Recharge",
       customer: {
-        name: Driver.name,
-        email: Driver.email,
-        contact: Driver.phone_number,
+        name: Driver.name!,
+        email: Driver.email!,
+        contact: Driver.phone_number!,
       },
       notes: {
         driverId,
+        name: Driver.name!,
+        email: Driver.email!,
+        contact: Driver.phone_number!,
         netAmount: amount,
       },
     });
