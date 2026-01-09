@@ -53,9 +53,9 @@ app.use("/api/v1/ride", rideRouter);
 app.use("/api/v1/complaints", complaintRouter);
 
 // testing api
-app.get("/test", (req: Request, res: Response, next: NextFunction) => {
+app.get("/", (req: Request, res: Response, next: NextFunction) => {
   res.status(200).json({
     succcess: true,
-    message: "API is working",
+    message: "Server API is working",
   });
 });
