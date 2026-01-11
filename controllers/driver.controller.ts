@@ -374,29 +374,46 @@ export const verifyPhoneOtpForRegistration = async (
     try {
         const { phone_number, otp } = req.body;
 
-        try {
-            await client.verify.v2
-                .services(process.env.TWILIO_SERVICE_SID!)
-                .verificationChecks.create({
-                    to: phone_number,
-                    code: otp,
+        // 🔥 REVIEW MODE — STATIC OTP ONLY
+        if (process.env.REVIEW_MODE === "true") {
+            if (otp !== process.env.REVIEW_STATIC_OTP) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP!",
                 });
+            }
 
-            await sendingOtpToEmail(req, res);
-        } catch (error) {
-            console.log(error);
-            res.status(400).json({
+            // Continue registration flow (send email OTP)
+            return await sendingOtpToEmail(req, res);
+        }
+
+        // 🔒 NORMAL MODE — TWILIO VERIFY
+        const verification = await client.verify.v2
+            .services(process.env.TWILIO_SERVICE_SID!)
+            .verificationChecks.create({
+                to: phone_number,
+                code: otp,
+            });
+
+        if (verification.status !== "approved") {
+            return res.status(400).json({
                 success: false,
-                message: "Something went wrong!",
+                message: "Invalid or expired OTP!",
             });
         }
+
+        // Continue registration flow (send email OTP)
+        await sendingOtpToEmail(req, res);
+
     } catch (error) {
-        console.log(error);
+        console.error(error);
         res.status(400).json({
             success: false,
+            message: "Something went wrong!",
         });
     }
 };
+
 
 // sending otp to email
 export const sendingOtpToEmail = async (req: Request, res: Response) => {
