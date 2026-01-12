@@ -108,59 +108,124 @@ export const refreshTokenDriver = async (req: Request, res: Response) => {
  * Logout Controller
  */
 export const logoutDriver = async (req: Request, res: Response) => {
-    const { driverId } = req.body;
-
-    // ------------------- Validate Device Header -------------------
-    const deviceHeader = req.headers["x-device-info"];
-    if (!deviceHeader) {
-        return res.status(400).json({ message: "Device info missing in request headers." });
-    }
-
-    let deviceInfo: any;
-    try {
-        deviceInfo = typeof deviceHeader === "string"
-            ? JSON.parse(deviceHeader)
-            : deviceHeader;
-    } catch (err) {
-        return res.status(400).json({ message: "Invalid device info format." });
-    }
-
-    const fingerprint = deviceInfo?.fingerprint;
-    if (!fingerprint) {
-        return res.status(400).json({ message: "Device fingerprint missing in device info." });
-    }
-
-    if (!driverId) {
-        return res.status(400).json({ message: "Driver ID is required" });
-    }
+    console.log("🚪 [LOGOUT] Logout request received");
 
     try {
-        // ------------------- Find Driver -------------------
+        const { driverId } = req.body;
+        console.log("🆔 [LOGOUT] Driver ID:", driverId);
+
+        // ------------------- Device Info -------------------
+        const deviceHeader = req.headers["x-device-info"];
+
+        if (!deviceHeader) {
+            console.warn("⚠️ [LOGOUT] Device info header missing");
+            return res.status(400).json({ message: "Device info missing." });
+        }
+
+        let deviceInfo: any;
+        try {
+            deviceInfo =
+                typeof deviceHeader === "string"
+                    ? JSON.parse(deviceHeader)
+                    : deviceHeader;
+        } catch (err) {
+            console.error("❌ [LOGOUT] Invalid device info format", err);
+            return res.status(400).json({ message: "Invalid device info format." });
+        }
+
+        const fingerprint = deviceInfo?.fingerprint;
+        console.log("📱 [LOGOUT] Device Fingerprint:", fingerprint);
+
+        if (!fingerprint) {
+            console.warn("⚠️ [LOGOUT] Fingerprint missing in device info");
+            return res.status(400).json({ message: "Fingerprint missing." });
+        }
+
+        // ------------------- Driver Lookup -------------------
         const existingDriver = await driver.findById(driverId);
 
         if (!existingDriver) {
-            return res.status(404).json({ message: "Driver not found" });
+            console.warn("❌ [LOGOUT] Driver not found:", driverId);
+            return res.status(404).json({ message: "Driver not found." });
         }
 
-        // ------------------- Device Mismatch Handling -------------------
-        let updatedDriver = existingDriver;
+        console.log("👤 [LOGOUT] Driver found:", {
+            id: existingDriver._id,
+            status: existingDriver.status,
+            activeDeviceFingerprint: existingDriver.activeDevice?.fingerprint,
+        });
 
-        if (
-            fingerprint &&
-            existingDriver.activeDevice &&
-            existingDriver.activeDevice.fingerprint === fingerprint
-        ) {
-            updatedDriver = await driver.findByIdAndUpdate(
-                driverId,
-                {
-                    status: "inactive",
-                    lastActive: new Date(),
-                },
-                { new: true }
+        // ------------------- Device Match Check -------------------
+        const isActiveDevice =
+            existingDriver.activeDevice?.fingerprint === fingerprint;
+
+        console.log(
+            isActiveDevice
+                ? "✅ [LOGOUT] Request from ACTIVE device"
+                : "⚠️ [LOGOUT] Request from NON-ACTIVE device"
+        );
+
+        // =====================================================
+        // 🔹 CASE 1: NON-ACTIVE DEVICE LOGOUT
+        // =====================================================
+        if (!isActiveDevice) {
+            console.log(
+                "🔐 [LOGOUT] Logging out session only (no status / socket / ride check)"
             );
+
+            res.cookie("driverRefreshToken", "", {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 0,
+            });
+
+            console.log("🍪 [LOGOUT] Refresh token cookie cleared");
+
+            return res.status(200).json({
+                success: true,
+                message: "Session logged out from this device.",
+                skipSocketCleanup: true,
+            });
         }
 
-        // ------------------- Clear Refresh Token Cookie -------------------
+        // =====================================================
+        // 🔹 CASE 2: ACTIVE DEVICE → CHECK ACTIVE RIDE
+        // =====================================================
+        console.log("🚗 [LOGOUT] Checking for active ride...");
+
+        const activeRide = await Ride.findOne({
+            driverId,
+            status: { $in: ["Booked", "Processing", "Arrived", "Ongoing", "Reached"] },
+        });
+
+        if (activeRide) {
+            console.warn("🚫 [LOGOUT] Active ride found:", {
+                rideId: activeRide._id,
+                status: activeRide.status,
+            });
+
+            return res.status(423).json({
+                success: false,
+                blockLogout: true,
+                message: "You can't logout while on a ride.",
+            });
+        }
+
+        console.log("✅ [LOGOUT] No active ride found");
+
+        // =====================================================
+        // 🔹 CASE 3: ACTIVE DEVICE + NO RIDE → NORMAL LOGOUT
+        // =====================================================
+        console.log("📴 [LOGOUT] Updating driver status to INACTIVE");
+
+        await driver.findByIdAndUpdate(driverId, {
+            status: "inactive",
+            lastActive: new Date(),
+        });
+
+        console.log("🕒 [LOGOUT] lastActive updated");
+
         res.cookie("driverRefreshToken", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
@@ -168,21 +233,24 @@ export const logoutDriver = async (req: Request, res: Response) => {
             maxAge: 0,
         });
 
-        // ------------------- Success Response -------------------
+        console.log("🍪 [LOGOUT] Refresh token cookie cleared");
+        console.log("✅ [LOGOUT] Driver logged out successfully");
+
         return res.status(200).json({
             success: true,
-            message:
-                updatedDriver?.status === "inactive"
-                    ? "Driver logged out successfully."
-                    : "Driver session terminated on a different device.",
-            driver: updatedDriver,
+            message: "Driver logged out successfully.",
         });
 
     } catch (error) {
-        console.error("Logout Error:", error);
-        return res.status(500).json({ message: "Internal server error" });
+        console.error("🔥 [LOGOUT] Unexpected error during logout:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
     }
 };
+
 
 
 // sending otp to driver phone number
@@ -191,12 +259,15 @@ export const sendingOtpToPhone = async (
     res: Response,
     next: NextFunction
 ) => {
+    console.log("📲 [PHONE OTP] Request received");
+
     try {
         const { phone_number } = req.body;
-        console.log(phone_number);
+        console.log("📞 [PHONE OTP] Phone number:", phone_number);
 
-        // 🔥 REVIEW MODE — SKIP TWILIO
         if (process.env.REVIEW_MODE === "true") {
+            console.log("🧪 [PHONE OTP] REVIEW_MODE enabled — skipping Twilio");
+
             return res.status(200).json({
                 success: true,
                 message: "OTP sent (review mode)",
@@ -205,6 +276,8 @@ export const sendingOtpToPhone = async (
         }
 
         try {
+            console.log("📡 [PHONE OTP] Sending OTP via Twilio");
+
             await client.verify.v2
                 ?.services(process.env.TWILIO_SERVICE_SID!)
                 .verifications.create({
@@ -212,113 +285,80 @@ export const sendingOtpToPhone = async (
                     to: phone_number,
                 });
 
-            res.status(201).json({
-                success: true,
-            });
+            console.log("✅ [PHONE OTP] OTP sent successfully");
+
+            res.status(201).json({ success: true });
+
         } catch (error) {
-            console.log(error);
-            res.status(400).json({
-                success: false,
-            });
+            console.error("❌ [PHONE OTP] Twilio error:", error);
+            res.status(400).json({ success: false });
         }
     } catch (error) {
-        console.log(error);
-        res.status(400).json({
-            success: false,
-        });
+        console.error("🔥 [PHONE OTP] Unexpected error:", error);
+        res.status(400).json({ success: false });
     }
 };
 
 
 // verifying otp for login
 export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
+    console.log("🔑 [LOGIN OTP] Verification started");
+
     try {
         const { phone_number, otp } = req.body;
+        console.log("📞 [LOGIN OTP] Phone:", phone_number);
 
-        // Step 1: Check if driver exists
         const Driver = await driver.findOne({ phone_number });
 
         if (!Driver) {
+            console.warn("❌ [LOGIN OTP] Driver not found");
             return res.status(404).json({
                 success: false,
                 message: "No account found with this phone number.",
             });
         }
 
-        // Step 2: Check if approved
+        console.log("👤 [LOGIN OTP] Driver found:", Driver._id);
+
         if (!Driver.is_approved) {
+            console.warn("🚫 [LOGIN OTP] Driver not approved");
             return res.status(403).json({
                 success: false,
-                message: "Your account is not approved yet. Please wait for our approval.",
+                message: "Your account is not approved yet.",
             });
         }
 
-        // 🔥 REVIEW MODE — STATIC OTP ONLY
         if (process.env.REVIEW_MODE === "true") {
+            console.log("🧪 [LOGIN OTP] REVIEW_MODE enabled");
+
             if (otp !== process.env.REVIEW_STATIC_OTP) {
+                console.warn("❌ [LOGIN OTP] Invalid static OTP");
+                return res.status(400).json({ success: false, message: "Invalid OTP!" });
+            }
+
+            console.log("✅ [LOGIN OTP] Static OTP verified");
+        } else {
+            console.log("📡 [LOGIN OTP] Verifying OTP with Twilio");
+
+            const verification = await client.verify.v2
+                .services(process.env.TWILIO_SERVICE_SID!)
+                .verificationChecks.create({ to: phone_number, code: otp });
+
+            console.log("📬 [LOGIN OTP] Twilio status:", verification.status);
+
+            if (verification.status !== "approved") {
+                console.warn("❌ [LOGIN OTP] OTP invalid or expired");
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid OTP!",
+                    message: "Invalid or expired OTP!",
                 });
             }
 
-            // 🔥 SAVE DEVICE INFO (SAME AS NORMAL MODE)
-            const deviceInfoHeader = req.headers["x-device-info"];
-            console.log(deviceInfoHeader);
-
-            if (deviceInfoHeader) {
-                try {
-                    const deviceInfo = JSON.parse(deviceInfoHeader as string);
-
-                    Driver.activeDevice = {
-                        fingerprint: deviceInfo.fingerprint,
-                        brand: deviceInfo.brand,
-                        model: deviceInfo.model,
-                        osName: deviceInfo.osName,
-                        osBuildId: deviceInfo.osBuildId,
-                    };
-
-                    await Driver.save();
-                } catch (err) {
-                    console.error("Failed to save device info:", err);
-                }
-            }
-
-            // Step 5: generate token (UNCHANGED)
-            const accessToken = generateAccessToken(Driver._id);
-            const refreshToken = generateRefreshToken(Driver._id);
-
-            res.cookie("driverRefreshToken", refreshToken, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "strict",
-                path: "/",
-                maxAge: 30 * 24 * 60 * 60 * 1000,
-            });
-
-            return res.status(201).json({
-                success: true,
-                accessToken,
-                driver: Driver,
-                reviewMode: true,
-            });
+            console.log("✅ [LOGIN OTP] OTP verified");
         }
 
-        // 🔒 NORMAL MODE — TWILIO VERIFY (UNCHANGED)
-        const verification = await client.verify.v2
-            .services(process.env.TWILIO_SERVICE_SID!)
-            .verificationChecks.create({ to: phone_number, code: otp });
-
-        if (verification.status !== "approved") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid or expired OTP!",
-            });
-        }
-
-        // Step 4: Save device info (UNCHANGED)
         const deviceInfoHeader = req.headers["x-device-info"];
-        console.log(deviceInfoHeader);
+        console.log("📱 [LOGIN OTP] Device header:", deviceInfoHeader);
 
         if (deviceInfoHeader) {
             try {
@@ -333,12 +373,15 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 };
 
                 await Driver.save();
+                console.log("💾 [LOGIN OTP] Device info saved");
+
             } catch (err) {
-                console.error("Failed to save device info:", err);
+                console.error("❌ [LOGIN OTP] Device info parse error:", err);
             }
         }
 
-        // Step 5: generate token (UNCHANGED)
+        console.log("🔐 [LOGIN OTP] Generating tokens");
+
         const accessToken = generateAccessToken(Driver._id);
         const refreshToken = generateRefreshToken(Driver._id);
 
@@ -350,17 +393,17 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
+        console.log("🍪 [LOGIN OTP] Tokens issued");
+
         res.status(201).json({
             success: true,
             accessToken,
             driver: Driver,
         });
+
     } catch (error) {
-        console.error(error);
-        res.status(400).json({
-            success: false,
-            message: "Something went wrong!",
-        });
+        console.error("🔥 [LOGIN OTP] Unexpected error:", error);
+        res.status(400).json({ success: false, message: "Something went wrong!" });
     }
 };
 
@@ -371,23 +414,28 @@ export const verifyPhoneOtpForRegistration = async (
     res: Response,
     next: NextFunction
 ) => {
+    console.log("📝 [REGISTER OTP] Verification started");
+
     try {
         const { phone_number, otp } = req.body;
+        console.log("📞 [REGISTER OTP] Phone:", phone_number);
 
-        // 🔥 REVIEW MODE — STATIC OTP ONLY
         if (process.env.REVIEW_MODE === "true") {
+            console.log("🧪 [REGISTER OTP] REVIEW_MODE enabled");
+
             if (otp !== process.env.REVIEW_STATIC_OTP) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid OTP!",
-                });
+                console.warn("❌ [REGISTER OTP] Invalid static OTP");
+                return res.status(400).json({ success: false, message: "Invalid OTP!" });
             }
 
-            // Continue registration flow (send email OTP)
+            console.log("✅ [REGISTER OTP] Static OTP verified");
+            console.log("➡️ [REGISTER OTP] Moving to email OTP");
+
             return await sendingOtpToEmail(req, res);
         }
 
-        // 🔒 NORMAL MODE — TWILIO VERIFY
+        console.log("📡 [REGISTER OTP] Verifying OTP with Twilio");
+
         const verification = await client.verify.v2
             .services(process.env.TWILIO_SERVICE_SID!)
             .verificationChecks.create({
@@ -395,30 +443,33 @@ export const verifyPhoneOtpForRegistration = async (
                 code: otp,
             });
 
+        console.log("📬 [REGISTER OTP] Twilio status:", verification.status);
+
         if (verification.status !== "approved") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid or expired OTP!",
-            });
+            console.warn("❌ [REGISTER OTP] OTP invalid or expired");
+            return res.status(400).json({ success: false, message: "Invalid or expired OTP!" });
         }
 
-        // Continue registration flow (send email OTP)
+        console.log("✅ [REGISTER OTP] OTP verified");
+        console.log("➡️ [REGISTER OTP] Moving to email OTP");
+
         await sendingOtpToEmail(req, res);
 
     } catch (error) {
-        console.error(error);
-        res.status(400).json({
-            success: false,
-            message: "Something went wrong!",
-        });
+        console.error("🔥 [REGISTER OTP] Unexpected error:", error);
+        res.status(400).json({ success: false, message: "Something went wrong!" });
     }
 };
 
 
+
 // sending otp to email
 export const sendingOtpToEmail = async (req: Request, res: Response) => {
+    console.log("📧 [EMAIL OTP] Function called");
+
     try {
-        console.log(req.body)
+        console.log("📦 [EMAIL OTP] Request body received:", req.body);
+
         const {
             name,
             country,
@@ -441,8 +492,10 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             profilePic
         } = req.body;
 
+        console.log("👤 [EMAIL OTP] Preparing OTP for:", email);
 
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        console.log("🔐 [EMAIL OTP] OTP generated");
 
         const driver = {
             name,
@@ -465,66 +518,148 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             capacity,
             profilePic
         };
+
+        console.log("📄 [EMAIL OTP] Driver payload prepared");
+
         const token = jwt.sign(
-            {
-                driver,
-                otp,
-            },
+            { driver, otp },
             process.env.EMAIL_ACTIVATION_SECRET!,
-            {
-                expiresIn: "5m",
-            }
+            { expiresIn: "5m" }
         );
-        const logoUrl = "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
 
-        // --- EMAIL TEMPLATE ---
+        console.log("🔏 [EMAIL OTP] JWT token generated (5 min expiry)");
+
+        const logoUrl =
+            "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+
+        console.log("🎨 [EMAIL OTP] Preparing email template");
+
+
+
         const emailTemplate = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Verify your email</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
-          .container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 40px; margin-bottom: 40px; }
-          .header { padding: 30px 40px; text-align: center; background-color: #000000; }
-          .logo { max-height: 40px; }
-          .content { padding: 40px; color: #333333; line-height: 1.6; }
-          .otp-block { background-color: #f0f2f5; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; border: 1px dashed #ccc; }
-          .otp-code { font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #000000; margin: 0; }
-          .footer { background-color: #f9f9f9; padding: 20px 40px; text-align: center; font-size: 12px; color: #888888; border-top: 1px solid #eeeeee; }
-          .footer a { color: #888888; text-decoration: underline; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-             <img src="${logoUrl}" alt="Stark Logo" class="logo" style="display:block; margin:auto;" /> 
-          </div>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verify your email</title>
 
-          <div class="content">
-            <h2 style="margin-top: 0; font-weight: 600; color: #111;">Verify your email address</h2>
-            <p>Hi ${name},</p>
-            <p>Thank you for joining <strong>Stark</strong>. To complete your registration, please verify your email address by entering the code below:</p>
-            
-            <div class="otp-block">
-              <p class="otp-code">${otp}</p>
-            </div>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f4f4f7;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
 
-            <p style="font-size: 14px; color: #666;">This OTP is valid for <strong>5 minutes</strong>. If you did not request this verification, please disregard this email.</p>
-            
-            <p style="margin-top: 30px;">Best regards,<br><strong>The Stark Team</strong></p>
-          </div>
+    .container {
+      width: 100%;
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
 
-          <div class="footer">
-            <p>&copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.</p>
-            <p>This is an automated message, please do not reply.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    .header {
+      padding: 30px 40px;
+      text-align: center;
+      background-color: #000000;
+    }
+
+    .logo {
+      max-height: 40px;
+    }
+
+    .content {
+      padding: 40px;
+      color: #333333;
+      line-height: 1.6;
+    }
+
+    .otp-block {
+      background-color: #f0f2f5;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin: 30px 0;
+      border: 1px dashed #ccc;
+    }
+
+    .otp-code {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 8px;
+      color: #000000;
+      margin: 0;
+    }
+
+    .footer {
+      background-color: #f9f9f9;
+      padding: 20px 40px;
+      text-align: center;
+      font-size: 12px;
+      color: #888888;
+      border-top: 1px solid #eeeeee;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <img
+        src="${logoUrl}"
+        alt="Stark Logo"
+        class="logo"
+        style="display:block; margin:auto;"
+      />
+    </div>
+
+    <div class="content">
+      <h2 style="margin-top:0; font-weight:600; color:#111;">
+        Verify your email address
+      </h2>
+
+      <p>Hi ${name},</p>
+
+      <p>
+        Thank you for joining <strong>Stark</strong>. To complete your
+        registration, please verify your email address by entering the code
+        below:
+      </p>
+
+      <div class="otp-block">
+        <p class="otp-code">${otp}</p>
+      </div>
+
+      <p style="font-size:14px; color:#666;">
+        This OTP is valid for <strong>5 minutes</strong>. If you did not request
+        this verification, please disregard this email.
+      </p>
+
+      <p style="margin-top:30px;">
+        Best regards,<br />
+        <strong>The Stark Team</strong>
+      </p>
+    </div>
+
+    <div class="footer">
+      <p>
+        &copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.
+      </p>
+      <p>This is an automated message, please do not reply.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+
+        console.log("📨 [EMAIL OTP] Sending email via Nylas");
+
         try {
             await nylas.messages.send({
                 identifier: process.env.USER_GRANT_ID!,
@@ -535,35 +670,51 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
                 },
             });
 
+            console.log("✅ [EMAIL OTP] Email sent successfully");
+
             res.status(201).json({
                 success: true,
                 token,
             });
+
         } catch (error: any) {
+            console.error("❌ [EMAIL OTP] Nylas send failed:", error);
+
             res.status(400).json({
                 success: false,
                 message: error.message,
             });
-            console.log(error);
         }
     } catch (error) {
-        console.log(error);
+        console.error("🔥 [EMAIL OTP] Unexpected error:", error);
     }
 };
 
 // verifying email otp and creating driver account
 export const verifyingEmailOtp = async (req: Request, res: Response) => {
+    console.log("✅ [EMAIL VERIFY] Function called");
+
     try {
         const { otp, token } = req.body;
+        console.log("🔑 [EMAIL VERIFY] OTP & token received");
 
-        const newDriver: any = jwt.verify(token, process.env.EMAIL_ACTIVATION_SECRET!);
+        const newDriver: any = jwt.verify(
+            token,
+            process.env.EMAIL_ACTIVATION_SECRET!
+        );
+
+        console.log("🔓 [EMAIL VERIFY] JWT verified successfully");
 
         if (newDriver.otp !== otp) {
+            console.warn("❌ [EMAIL VERIFY] OTP mismatch");
+
             return res.status(400).json({
                 success: false,
                 message: "OTP is not correct or expired!",
             });
         }
+
+        console.log("✅ [EMAIL VERIFY] OTP matched");
 
         const {
             name,
@@ -587,6 +738,8 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             profilePic
         } = newDriver.driver;
 
+        console.log("🔍 [EMAIL VERIFY] Checking for duplicate driver");
+
         const existingDriver = await driver.findOne({
             $or: [
                 { email },
@@ -598,8 +751,9 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             ],
         });
 
-
         if (existingDriver) {
+            console.warn("🚫 [EMAIL VERIFY] Duplicate detected");
+
             let message = "Duplicate entry detected!";
 
             if (existingDriver.email === email)
@@ -618,41 +772,22 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             return res.status(409).json({ success: false, message });
         }
 
-        // const typeUpper = vehicle_type.toUpperCase();
+        console.log("🆕 [EMAIL VERIFY] No duplicates found");
 
-        // const baseFare = parseFloat(process.env[`BASEFARE_${typeUpper}`] || "0");
-        // const perKmRate = parseFloat(process.env[`PERKM_${typeUpper}`] || "0");
-        // const perMinRate = parseFloat(process.env[`PERMIN_${typeUpper}`] || "0");
-        // const minFare = parseFloat(process.env[`MINFARE_${typeUpper}`] || "0");
-
-        // if (!baseFare || !perKmRate || !perMinRate || !minFare) {
-        //     return res.status(500).json({
-        //         success: false,
-        //         message: `Fare not fully configured for vehicle type: ${vehicle_type}`,
-        //     });
-        // }
-
-        // 🔑 Convert string -> Date objects safely
-        // 🔑 Helper function
-        // Convert DD-MM-YYYY -> Date object (ISO format in MongoDB)
         const parseDate = (value: string): Date | null => {
             if (!value) return null;
 
             const parts = value.split("-");
             if (parts.length === 3) {
                 const [day, month, year] = parts.map(Number);
-                // ✅ construct as Date(year, month-1, day) → automatically stores ISO
-                // return new Date(Date.UTC(year, month - 1, day));
-
                 return new Date(year, month - 1, day);
             }
 
-            // fallback for already ISO-like formats
             const parsed = new Date(value);
             return isNaN(parsed.getTime()) ? null : parsed;
         };
 
-
+        console.log("🛠️ [EMAIL VERIFY] Creating driver document");
 
         const Driver = new driver({
             name,
@@ -674,23 +809,28 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             vehicle_color,
             capacity,
             profilePic
-            // baseFare,
-            // perKmRate,
-            // perMinRate,
-            // minFare,
         });
 
         await Driver.save();
 
+        console.log("🎉 [EMAIL VERIFY] Driver saved successfully");
+
         res.status(201).json({
             success: true,
-            message: "Thank you for registering. Your account is being reviewed, and we will reach out soon.",
+            message:
+                "Thank you for registering. Your account is being reviewed, and we will reach out soon.",
         });
+
     } catch (error) {
-        console.error(error);
-        res.status(400).json({ success: false, message: "Your OTP is expired or invalid!" });
+        console.error("🔥 [EMAIL VERIFY] JWT invalid or expired:", error);
+
+        res.status(400).json({
+            success: false,
+            message: "Your OTP is expired or invalid!",
+        });
     }
 };
+
 
 
 // get logged in driver data

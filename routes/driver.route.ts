@@ -26,7 +26,7 @@ driverRouter.post("/send-otp", sendingOtpToPhone);
 
 driverRouter.post("/login", checkActiveRide, verifyPhoneOtpForLogin);
 
-driverRouter.post("/logout", checkActiveRide, logoutDriver);
+driverRouter.post("/logout", logoutDriver);
 
 driverRouter.post("/refresh-token", refreshTokenDriver);
 
