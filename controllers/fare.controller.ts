@@ -108,65 +108,76 @@ export const getFareByVehicleType = async (req: Request, res: Response) => {
 
 export const createFare = async (req: Request, res: Response) => {
   try {
-    console.log(req.body)
     const {
       vehicle_type,
       baseFare,
+      baseFareUptoKm,
       perKmRate,
       perMinRate,
-      minFare,
       surgeMultiplier,
       district,
     } = req.body;
 
-    if (!vehicle_type) {
-      return res.status(400).json({ success: false, message: "Vehicle type is required." });
+    if (!vehicle_type || !district) {
+      return res.status(400).json({
+        success: false,
+        message: "Vehicle type and district are required",
+      });
     }
 
-    // Check if fare already exists for this vehicle type and district
     const existingFare = await Fare.findOne({ vehicle_type, district });
 
     if (existingFare) {
       return res.status(409).json({
         success: false,
-        message: "Fare for this vehicle type and district already exists.",
+        message: "Fare already exists for this vehicle type and district",
       });
     }
 
-    // Create new fare
     const newFare = new Fare({
       vehicle_type,
-      baseFare: baseFare ?? parseFloat(process.env[`BASEFARE_${vehicle_type.toUpperCase()}`] || "0"),
-      perKmRate: perKmRate ?? parseFloat(process.env[`PERKM_${vehicle_type.toUpperCase()}`] || "0"),
-      perMinRate: perMinRate ?? parseFloat(process.env[`PERMIN_${vehicle_type.toUpperCase()}`] || "0"),
-      minFare: minFare ?? parseFloat(process.env[`MINFARE_${vehicle_type.toUpperCase()}`] || "0"),
+      baseFare,
+      baseFareUptoKm,
+      perKmRate,
+      perMinRate,
       surgeMultiplier: surgeMultiplier ?? 1,
-      district: district ?? "Alappuzha",
+      district,
     });
 
     await newFare.save();
-    return res.status(201).json({ success: true, message: "Fare created successfully.", data: newFare });
+
+    return res.status(201).json({
+      success: true,
+      message: "Fare created successfully",
+      data: newFare,
+    });
   } catch (error) {
     console.error("Fare creation error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error." });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 
+
 export const updateFare = async (req: Request, res: Response) => {
   try {
-    console.log(req.body)
     const {
       vehicle_type,
+      district,
       baseFare,
+      baseFareUptoKm,
       perKmRate,
       perMinRate,
-      minFare,
       surgeMultiplier,
-      district,
     } = req.body;
 
-    if (!vehicle_type) {
-      return res.status(400).json({ success: false, message: "Vehicle type is required." });
+    if (!vehicle_type || !district) {
+      return res.status(400).json({
+        success: false,
+        message: "Vehicle type and district are required",
+      });
     }
 
     const fare = await Fare.findOne({ vehicle_type, district });
@@ -174,26 +185,33 @@ export const updateFare = async (req: Request, res: Response) => {
     if (!fare) {
       return res.status(404).json({
         success: false,
-        message: "Fare not found for this vehicle type and district.",
+        message: "Fare not found",
       });
     }
 
-    // Update fare details
     fare.baseFare = baseFare ?? fare.baseFare;
+    fare.baseFareUptoKm = baseFareUptoKm ?? fare.baseFareUptoKm;
     fare.perKmRate = perKmRate ?? fare.perKmRate;
     fare.perMinRate = perMinRate ?? fare.perMinRate;
-    fare.minFare = minFare ?? fare.minFare;
     fare.surgeMultiplier = surgeMultiplier ?? fare.surgeMultiplier;
-    fare.district = district ?? fare.district;
 
     await fare.save();
 
-    return res.status(200).json({ success: true, message: "Fare updated successfully.", data: fare });
+    return res.status(200).json({
+      success: true,
+      message: "Fare updated successfully",
+      data: fare,
+    });
   } catch (error) {
     console.error("Fare update error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error." });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
+
+
 // Fares
 export const getFares = async (req: Request, res: Response) => {
   try {
