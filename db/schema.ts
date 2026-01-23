@@ -241,7 +241,7 @@ const driverWalletSchema = new Schema(
 
         action: {
           type: String,
-          enum: ["recharge", "platform_fee", "ride_payment", "refund", "adjustment"],
+          enum: ["recharge", "platform_fee", "ride_payment", "refund", "adjustment", "bonus"],
           required: true,
         },
 
@@ -290,7 +290,7 @@ const complaintSchema = new Schema(
     // Determines whether it's a User or Driver
     userType: {
       type: String,
-      enum: ["user","driver"],
+      enum: ["user", "driver"],
       required: true,
     },
 
