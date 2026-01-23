@@ -254,48 +254,97 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 
 export const razorpayWebhook = async (req: Request, res: Response) => {
   try {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
-    const receivedSignature = req.headers["x-razorpay-signature"] as string;
+    console.log("🔔 Razorpay Webhook Triggered");
 
-    // 🔐 Verify signature
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+    console.log("🔑 Webhook secret loaded:", !!secret);
+
+    const receivedSignature = req.headers["x-razorpay-signature"] as string;
+    console.log("📩 Received Signature:", receivedSignature);
+
+    console.log("📦 Raw body is buffer:", Buffer.isBuffer(req.body));
+    console.log("📦 Raw body length:", req.body?.length);
+
+    // 🔐 SIGNATURE VERIFICATION
+    console.log("🔐 Verifying webhook signature...");
     const shasum = crypto.createHmac("sha256", secret);
     shasum.update(req.body);
     const digest = shasum.digest("hex");
 
+    console.log("🧮 Computed Digest:", digest);
+
     if (digest !== receivedSignature) {
+      console.log("❌ Signature mismatch — webhook rejected");
       return res.status(400).send("Invalid signature");
     }
 
-    const payload = JSON.parse(req.body.toString());
+    console.log("✅ Signature verified successfully");
 
-    if (payload.event !== "payment.captured") {
+    // 📥 Parse payload
+    const payload = JSON.parse(req.body.toString());
+    console.log("📦 Webhook payload parsed");
+
+    const event = payload.event;
+    console.log("📌 Event received:", event);
+
+    if (event !== "payment.captured") {
+      console.log("⏭️ Event ignored (not payment.captured)");
       return res.json({ status: "ignored" });
     }
 
+    // 💳 Payment entity
     const payment = payload.payload.payment.entity;
+    console.log("💳 Payment Entity:", {
+      id: payment.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: payment.status,
+    });
+
+    console.log("📝 Payment Notes:", payment.notes);
+
     const driverId = payment.notes.driverId;
     const netAmount = Number(payment.notes.netAmount);
 
-    // 🔒 Duplicate safety
+    console.log("👤 Driver ID:", driverId);
+    console.log("💰 Net Recharge Amount:", netAmount);
+
+    // 🔒 DUPLICATE CHECK
+    console.log("🔍 Checking for duplicate transaction...");
     const existingTx = await Transaction.findOne({
       paymentId: payment.id,
     });
 
     if (existingTx) {
+      console.log("⚠️ Duplicate payment detected:", payment.id);
       return res.json({ status: "duplicate" });
     }
 
-    // 🧠 Fetch wallet
+    console.log("🧾 No duplicate transaction found");
+
+    // 🧠 WALLET FETCH
+    console.log("👛 Fetching driver wallet...");
     const wallet = await DriverWallet.findOne({ driverId });
 
     const isFirstRecharge =
       !wallet || !wallet.history || wallet.history.length === 0;
 
-    // 🎁 Bonus only for first recharge
+    console.log("🔎 Is first recharge:", isFirstRecharge);
+
+    // 🎁 BONUS LOGIC
     const bonusAmount = isFirstRecharge ? getRandomBonus() : 0;
     const totalCredit = netAmount + bonusAmount;
 
-    // 💰 Atomic wallet update
+    if (bonusAmount > 0) {
+      console.log("🎁 First recharge bonus generated:", bonusAmount);
+    } else {
+      console.log("🚫 Bonus not applicable");
+    }
+
+    console.log("➕ Total credit to wallet:", totalCredit);
+
+    // 💰 WALLET UPDATE
+    console.log("💾 Updating wallet atomically...");
     const updatedWallet = await DriverWallet.findOneAndUpdate(
       { driverId },
       [
@@ -323,7 +372,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
                         referenceId: payment.id,
                         meta: { reason: "First Recharge Bonus" },
                         balanceAfter: {
-                          $add: ["$balance", bonusAmount],
+                          $add: ["$balance", totalCredit],
                         },
                         actionOn: new Date(),
                       },
@@ -338,7 +387,11 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       { upsert: true, new: true }
     );
 
-    // 🧾 Store transaction
+    console.log("✅ Wallet updated successfully");
+    console.log("💼 Updated Wallet Balance:", updatedWallet.balance);
+
+    // 🧾 TRANSACTION STORE
+    console.log("🧾 Storing transaction record...");
     await Transaction.create({
       driverId,
       grossAmount: payment.amount / 100,
@@ -348,13 +401,16 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       status: "success",
     });
 
+    console.log("📄 Transaction stored successfully");
+    console.log("🎉 Wallet recharge flow completed");
+
     return res.json({
       status: "ok",
       wallet: updatedWallet.balance,
       bonusCredited: bonusAmount,
     });
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error("🔥 Razorpay webhook error:", error);
     return res.status(500).json({ message: "Webhook failed" });
   }
 };
