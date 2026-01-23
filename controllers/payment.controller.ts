@@ -194,19 +194,19 @@ export const createPaymentLink = async (req: Request, res: Response) => {
     const firstRechargeMin = Driver.vehicle_type === "Auto" ? 500 : 1000;
     const minRecharge = 250;
 
-    // if (isFirstRecharge && amount < firstRechargeMin) {
-    //   return res.status(400).json({
-    //     message: `First recharge must be ₹${firstRechargeMin} or more`,
-    //   });
-    // }
+    if (isFirstRecharge && amount < firstRechargeMin) {
+      return res.status(400).json({
+        message: `First recharge must be ₹${firstRechargeMin} or more`,
+      });
+    }
 
-    // if (!isFirstRecharge) {
-    //   if (amount < minRecharge || amount % 50 !== 0) {
-    //     return res.status(400).json({
-    //       message: "Recharge must be minimum ₹250 and in multiples of ₹50",
-    //     });
-    //   }
-    // }
+    if (!isFirstRecharge) {
+      if (amount < minRecharge || amount % 50 !== 0) {
+        return res.status(400).json({
+          message: "Recharge must be minimum ₹250 and in multiples of ₹50",
+        });
+      }
+    }
 
 
     // 💰 Razorpay fee calc (same logic you already use)
