@@ -111,7 +111,7 @@ const driverSchema = new Schema({
     default: Date.now,
   },
 
-  is_approved: { type: Boolean, default: true },
+  is_approved: { type: Boolean, default: false },
   pending_suspension: { type: Boolean, default: false },
 
 
