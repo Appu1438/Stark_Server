@@ -290,7 +290,7 @@ const complaintSchema = new Schema(
     // Determines whether it's a User or Driver
     userType: {
       type: String,
-      enum: ["User", "Driver"],
+      enum: ["user","driver"],
       required: true,
     },
 
