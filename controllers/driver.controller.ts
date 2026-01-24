@@ -264,17 +264,6 @@ export const sendingOtpToPhone = async (
     try {
         const { phone_number } = req.body;
 
-        // 1️⃣ Check driver exists
-        const Driver = await driver.findOne({ phone_number });
-
-        // 2️⃣ Check approval
-        if (!Driver.is_approved) {
-            return res.status(403).json({
-                success: false,
-                message: "Your account is not approved yet.",
-            });
-        }
-
         // 3️⃣ REVIEW MODE
         if (process.env.REVIEW_MODE === "true") {
             return res.status(200).json({
