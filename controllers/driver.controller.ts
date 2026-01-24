@@ -266,12 +266,6 @@ export const sendingOtpToPhone = async (
 
         // 1️⃣ Check driver exists
         const Driver = await driver.findOne({ phone_number });
-        if (!Driver) {
-            return res.status(404).json({
-                success: false,
-                message: "No account found with this phone number.",
-            });
-        }
 
         // 2️⃣ Check approval
         if (!Driver.is_approved) {
@@ -305,7 +299,7 @@ export const sendingOtpToPhone = async (
         // 6️⃣ Send WhatsApp OTP
         await client.messages.create({
             from: process.env.TWILIO_PHONE_NUMBER!, // +1XXXXXXXXXX (Twilio number)
-            to: `whatsapp:${phone_number}`,
+            to: phone_number,                      // +91XXXXXXXXXX
             body: `Your Stark Driver OTP is ${otp}. It expires in 5 minutes.`,
         });
 
@@ -331,7 +325,7 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
         if (!Driver) {
             return res.status(404).json({
                 success: false,
-                message: "No account found with this phone number.",
+                message: "No account found please signup first.",
             });
         }
 
