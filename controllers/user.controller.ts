@@ -4,7 +4,7 @@ import twilio from "twilio";
 import jwt from "jsonwebtoken";
 import { nylas } from "../app";
 import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
-import { Fare, Ride, RideRequest, User } from "../db/schema";
+import { Fare, Otp, Ride, RideRequest, User } from "../db/schema";
 import mongoose from "mongoose";
 
 
@@ -86,12 +86,13 @@ export const logout = async (req: Request, res: Response) => {
 
 
 // 📌 Register new user (Send OTP via SMS)
+// 📌 Register new user (Send OTP via WhatsApp)
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const { phone_number } = req.body;
     console.log("user", phone_number);
 
-    // 🔥 REVIEW MODE — SKIP TWILIO COMPLETELY
+    // 🔥 REVIEW MODE — SKIP WHATSAPP
     if (process.env.REVIEW_MODE === "true") {
       return res.status(200).json({
         success: true,
@@ -100,21 +101,29 @@ export const registerUser = async (req: Request, res: Response) => {
       });
     }
 
-    // 🔒 NORMAL MODE — SEND REAL OTP
-    await client.verify.v2
-      .services(process.env.TWILIO_SERVICE_SID!)
-      .verifications.create({
-        channel: "sms",
-        to: phone_number,
-      });
+    // 🔐 Generate OTP
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-    res.status(201).json({ success: true });
+    // 🔄 Remove old OTPs
+    await Otp.deleteMany({ phone_number });
+
+    // 💾 Save OTP (Mongo TTL)
+    await Otp.create({ phone_number, otp });
+
+    // 📲 Send WhatsApp OTP
+    await client.messages.create({
+      from: process.env.TWILIO_PHONE_NUMBER!, // +1XXXXXXXXXX (Twilio number)
+      to: phone_number,                      // +91XXXXXXXXXX
+      body: `Your Stark Login OTP is ${otp}. It expires in 5 minutes.`,
+    });
+
+    return res.status(201).json({ success: true });
+
   } catch (error) {
-    console.log(error);
+    console.error(error);
     res.status(400).json({ success: false });
   }
 };
-
 
 
 // 📌 Verify OTP & login/register
@@ -122,7 +131,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { phone_number, otp } = req.body;
 
-    // 🔥 REVIEW MODE — STATIC OTP ONLY
+    // 🔥 REVIEW MODE — STATIC OTP
     if (process.env.REVIEW_MODE === "true") {
       if (otp !== process.env.REVIEW_STATIC_OTP) {
         return res.status(400).json({
@@ -130,95 +139,55 @@ export const verifyOtp = async (req: Request, res: Response) => {
           message: "Invalid OTP",
         });
       }
+    } else {
+      // 🔐 Verify OTP from DB
+      const record = await Otp.findOne({ phone_number, otp });
 
-      let existingUser = await User.findOne({ phone_number });
-
-      if (!existingUser) {
-        existingUser = await User.create({ phone_number });
-      }
-
-      if (!existingUser.is_approved) {
-        return res.status(403).json({
+      if (!record) {
+        return res.status(400).json({
           success: false,
-          message: "Your account is suspended. please contact support.",
+          message: "Invalid or expired OTP",
         });
       }
 
-      const userData = existingUser.toObject();
-      userData.id = userData._id;
-      delete userData._id;
-
-      const accessToken = generateAccessToken(userData.id);
-      const refreshToken = generateRefreshToken(userData.id);
-
-      res.cookie("userRefreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      return res.status(200).json({
-        success: true,
-        accessToken,
-        user: userData,
-        reviewMode: true,
-      });
+      // 🧹 Remove OTP after success
+      await Otp.deleteMany({ phone_number });
     }
-
-    // 🔒 NORMAL MODE — TWILIO VERIFY
-    await client.verify.v2
-      .services(process.env.TWILIO_SERVICE_SID!)
-      .verificationChecks.create({
-        to: phone_number,
-        code: otp,
-      });
 
     let existingUser = await User.findOne({ phone_number });
 
-    if (existingUser) {
-      if (!existingUser.is_approved) {
-        return res.status(403).json({
-          success: false,
-          message: "Your account is suspended. please contact support.",
-        });
-      }
+    if (!existingUser) {
+      existingUser = await User.create({ phone_number });
+    }
 
-      const userData = existingUser.toObject();
-      userData.id = userData._id;
-      delete userData._id;
-
-      const accessToken = generateAccessToken(userData.id);
-      const refreshToken = generateRefreshToken(userData.id);
-
-      res.cookie("userRefreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      return res.status(201).json({
-        success: true,
-        accessToken,
-        user: userData,
-      });
-    } else {
-      const newUser = new User({ phone_number });
-      await newUser.save();
-
-      const userData = newUser.toObject();
-      userData.id = userData._id;
-      delete userData._id;
-
-      return res.status(200).json({
-        success: true,
-        message: "OTP verified successfully!",
-        user: userData,
+    if (!existingUser.is_approved) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is suspended. please contact support.",
       });
     }
+
+    const userData = existingUser.toObject();
+    userData.id = userData._id;
+    delete userData._id;
+
+    const accessToken = generateAccessToken(userData.id);
+    const refreshToken = generateRefreshToken(userData.id);
+
+    res.cookie("userRefreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.status(200).json({
+      success: true,
+      accessToken,
+      user: userData,
+    });
+
   } catch (error) {
     console.error(error);
     return res.status(400).json({
@@ -233,7 +202,12 @@ export const verifyOtp = async (req: Request, res: Response) => {
 export const sendingOtpToEmail = async (req: Request, res: Response) => {
   try {
     const { email, name, userId } = req.body;
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // 🔥 REVIEW MODE — STATIC OTP
+    const otp =
+      process.env.REVIEW_MODE === "true"
+        ? process.env.REVIEW_STATIC_OTP!
+        : Math.floor(1000 + Math.random() * 9000).toString();
 
     // Create a temporary token for verification
     const token = jwt.sign(
@@ -242,11 +216,20 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       { expiresIn: "5m" }
     );
 
-    // --- LOGO URL ---
-    // Replace this string with your actual hosted logo URL (e.g., AWS S3 link)
-    const logoUrl = "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+    // 🔥 REVIEW MODE — SKIP EMAIL SENDING
+    if (process.env.REVIEW_MODE === "true") {
+      return res.status(201).json({
+        success: true,
+        reviewMode: true,
+        token,
+      });
+    }
 
-    // --- EMAIL TEMPLATE ---
+    // --- LOGO URL ---
+    const logoUrl =
+      "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+
+    // --- EMAIL TEMPLATE (UNCHANGED) ---
     const emailTemplate = `
       <!DOCTYPE html>
       <html>
@@ -315,17 +298,31 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 };
 
 
+
 // 📌 Verify Email OTP
 export const verifyingEmail = async (req: Request, res: Response) => {
   try {
     const { otp, token } = req.body;
-    const decoded: any = jwt.verify(token, process.env.EMAIL_ACTIVATION_SECRET!);
+    const decoded: any = jwt.verify(
+      token,
+      process.env.EMAIL_ACTIVATION_SECRET!
+    );
 
-    if (decoded.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP is not correct or expired!",
-      });
+    // 🔥 REVIEW MODE — STATIC OTP CHECK
+    if (process.env.REVIEW_MODE === "true") {
+      if (otp !== process.env.REVIEW_STATIC_OTP) {
+        return res.status(400).json({
+          success: false,
+          message: "OTP is not correct or expired!",
+        });
+      }
+    } else {
+      if (decoded.otp !== otp) {
+        return res.status(400).json({
+          success: false,
+          message: "OTP is not correct or expired!",
+        });
+      }
     }
 
     const { name, email, userId } = decoded.user;
@@ -348,17 +345,18 @@ export const verifyingEmail = async (req: Request, res: Response) => {
       user.name = name;
       user.email = email;
       await user.save();
-      // await sendToken(user, res);
-      const accessToken = generateAccessToken(user.id)
-      const refreshToken = generateRefreshToken(user.id)
+
+      const accessToken = generateAccessToken(user.id);
+      const refreshToken = generateRefreshToken(user.id);
 
       res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production", // only over HTTPS in production
+        secure: process.env.NODE_ENV === "production",
         sameSite: "strict",
         path: "/",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: 30 * 24 * 60 * 60 * 1000,
       });
+
       res.status(201).json({
         success: true,
         accessToken,
@@ -378,6 +376,7 @@ export const verifyingEmail = async (req: Request, res: Response) => {
     });
   }
 };
+
 
 
 // 📌 Get logged-in user data

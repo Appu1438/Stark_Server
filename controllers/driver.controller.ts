@@ -4,7 +4,7 @@ import twilio from "twilio";
 import jwt from "jsonwebtoken";
 import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
 import { nylas } from "../app";
-import { driver, DriverWallet, Fare, Ride } from "../db/schema";
+import { driver, DriverWallet, Fare, Otp, Ride } from "../db/schema";
 import mongoose from "mongoose";
 
 import { generateOtp } from "../utils/generateOtp";
@@ -259,15 +259,30 @@ export const sendingOtpToPhone = async (
     res: Response,
     next: NextFunction
 ) => {
-    console.log("📲 [PHONE OTP] Request received");
+    console.log("📲 [LOGIN OTP REQUEST] Started");
 
     try {
         const { phone_number } = req.body;
-        console.log("📞 [PHONE OTP] Phone number:", phone_number);
 
+        // 1️⃣ Check driver exists
+        const Driver = await driver.findOne({ phone_number });
+        if (!Driver) {
+            return res.status(404).json({
+                success: false,
+                message: "No account found with this phone number.",
+            });
+        }
+
+        // 2️⃣ Check approval
+        if (!Driver.is_approved) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is not approved yet.",
+            });
+        }
+
+        // 3️⃣ REVIEW MODE
         if (process.env.REVIEW_MODE === "true") {
-            console.log("🧪 [PHONE OTP] REVIEW_MODE enabled — skipping Twilio");
-
             return res.status(200).json({
                 success: true,
                 message: "OTP sent (review mode)",
@@ -275,26 +290,31 @@ export const sendingOtpToPhone = async (
             });
         }
 
-        try {
-            console.log("📡 [PHONE OTP] Sending OTP via Twilio");
+        // 4️⃣ Generate OTP
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-            await client.verify.v2
-                ?.services(process.env.TWILIO_SERVICE_SID!)
-                .verifications.create({
-                    channel: "sms",
-                    to: phone_number,
-                });
+        // remove old OTP if any
+        await Otp.deleteMany({ phone_number });
 
-            console.log("✅ [PHONE OTP] OTP sent successfully");
+        // save new OTP
+        await Otp.create({
+            phone_number,
+            otp,
+        });
 
-            res.status(201).json({ success: true });
+        // 6️⃣ Send WhatsApp OTP
+        await client.messages.create({
+            from: process.env.TWILIO_PHONE_NUMBER!, // +1XXXXXXXXXX (Twilio number)
+            to: `whatsapp:${phone_number}`,
+            body: `Your Stark Driver OTP is ${otp}. It expires in 5 minutes.`,
+        });
 
-        } catch (error) {
-            console.error("❌ [PHONE OTP] Twilio error:", error);
-            res.status(400).json({ success: false });
-        }
+        console.log("✅ [LOGIN OTP REQUEST] WhatsApp OTP sent");
+
+        res.status(200).json({ success: true });
+
     } catch (error) {
-        console.error("🔥 [PHONE OTP] Unexpected error:", error);
+        console.error("🔥 [LOGIN OTP REQUEST] Error:", error);
         res.status(400).json({ success: false });
     }
 };
@@ -306,60 +326,47 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
 
     try {
         const { phone_number, otp } = req.body;
-        console.log("📞 [LOGIN OTP] Phone:", phone_number);
 
         const Driver = await driver.findOne({ phone_number });
-
         if (!Driver) {
-            console.warn("❌ [LOGIN OTP] Driver not found");
             return res.status(404).json({
                 success: false,
                 message: "No account found with this phone number.",
             });
         }
 
-        console.log("👤 [LOGIN OTP] Driver found:", Driver._id);
-
         if (!Driver.is_approved) {
-            console.warn("🚫 [LOGIN OTP] Driver not approved");
             return res.status(403).json({
                 success: false,
                 message: "Your account is not approved yet.",
             });
         }
 
+        // REVIEW MODE
         if (process.env.REVIEW_MODE === "true") {
-            console.log("🧪 [LOGIN OTP] REVIEW_MODE enabled");
-
             if (otp !== process.env.REVIEW_STATIC_OTP) {
-                console.warn("❌ [LOGIN OTP] Invalid static OTP");
                 return res.status(400).json({ success: false, message: "Invalid OTP!" });
             }
-
-            console.log("✅ [LOGIN OTP] Static OTP verified");
         } else {
-            console.log("📡 [LOGIN OTP] Verifying OTP with Twilio");
 
-            const verification = await client.verify.v2
-                .services(process.env.TWILIO_SERVICE_SID!)
-                .verificationChecks.create({ to: phone_number, code: otp });
+            const record = await Otp.findOne({
+                phone_number,
+                otp,
+            });
 
-            console.log("📬 [LOGIN OTP] Twilio status:", verification.status);
-
-            if (verification.status !== "approved") {
-                console.warn("❌ [LOGIN OTP] OTP invalid or expired");
+            if (!record) {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid or expired OTP!",
                 });
             }
 
-            console.log("✅ [LOGIN OTP] OTP verified");
+            // delete after success
+            await Otp.deleteMany({ phone_number });
         }
 
+        // 📱 Device info (UNCHANGED)
         const deviceInfoHeader = req.headers["x-device-info"];
-        console.log("📱 [LOGIN OTP] Device header:", deviceInfoHeader);
-
         if (deviceInfoHeader) {
             try {
                 const deviceInfo = JSON.parse(deviceInfoHeader as string);
@@ -373,15 +380,12 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 };
 
                 await Driver.save();
-                console.log("💾 [LOGIN OTP] Device info saved");
-
             } catch (err) {
-                console.error("❌ [LOGIN OTP] Device info parse error:", err);
+                console.error("❌ Device info parse error:", err);
             }
         }
 
-        console.log("🔐 [LOGIN OTP] Generating tokens");
-
+        // 🔐 Tokens (UNCHANGED)
         const accessToken = generateAccessToken(Driver._id);
         const refreshToken = generateRefreshToken(Driver._id);
 
@@ -393,8 +397,6 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        console.log("🍪 [LOGIN OTP] Tokens issued");
-
         res.status(201).json({
             success: true,
             accessToken,
@@ -403,10 +405,9 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
 
     } catch (error) {
         console.error("🔥 [LOGIN OTP] Unexpected error:", error);
-        res.status(400).json({ success: false, message: "Something went wrong!" });
+        res.status(400).json({ success: false });
     }
 };
-
 
 // verifying phone otp for registration
 export const verifyPhoneOtpForRegistration = async (
@@ -418,46 +419,35 @@ export const verifyPhoneOtpForRegistration = async (
 
     try {
         const { phone_number, otp } = req.body;
-        console.log("📞 [REGISTER OTP] Phone:", phone_number);
 
         if (process.env.REVIEW_MODE === "true") {
-            console.log("🧪 [REGISTER OTP] REVIEW_MODE enabled");
-
             if (otp !== process.env.REVIEW_STATIC_OTP) {
-                console.warn("❌ [REGISTER OTP] Invalid static OTP");
                 return res.status(400).json({ success: false, message: "Invalid OTP!" });
             }
-
-            console.log("✅ [REGISTER OTP] Static OTP verified");
-            console.log("➡️ [REGISTER OTP] Moving to email OTP");
 
             return await sendingOtpToEmail(req, res);
         }
 
-        console.log("📡 [REGISTER OTP] Verifying OTP with Twilio");
+        const record = await Otp.findOne({
+            phone_number,
+            otp,
+        });
 
-        const verification = await client.verify.v2
-            .services(process.env.TWILIO_SERVICE_SID!)
-            .verificationChecks.create({
-                to: phone_number,
-                code: otp,
+        if (!record) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired OTP!",
             });
-
-        console.log("📬 [REGISTER OTP] Twilio status:", verification.status);
-
-        if (verification.status !== "approved") {
-            console.warn("❌ [REGISTER OTP] OTP invalid or expired");
-            return res.status(400).json({ success: false, message: "Invalid or expired OTP!" });
         }
 
-        console.log("✅ [REGISTER OTP] OTP verified");
-        console.log("➡️ [REGISTER OTP] Moving to email OTP");
+        // delete after success
+        await Otp.deleteMany({ phone_number });
 
         await sendingOtpToEmail(req, res);
 
     } catch (error) {
         console.error("🔥 [REGISTER OTP] Unexpected error:", error);
-        res.status(400).json({ success: false, message: "Something went wrong!" });
+        res.status(400).json({ success: false });
     }
 };
 
@@ -494,7 +484,12 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 
         console.log("👤 [EMAIL OTP] Preparing OTP for:", email);
 
-        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        // 🔥 REVIEW MODE — STATIC OTP
+        const otp =
+            process.env.REVIEW_MODE === "true"
+                ? process.env.REVIEW_STATIC_OTP!
+                : Math.floor(1000 + Math.random() * 9000).toString();
+
         console.log("🔐 [EMAIL OTP] OTP generated");
 
         const driver = {
@@ -529,12 +524,21 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 
         console.log("🔏 [EMAIL OTP] JWT token generated (5 min expiry)");
 
+        // 🔥 REVIEW MODE — SKIP EMAIL SENDING
+        if (process.env.REVIEW_MODE === "true") {
+            console.log("🧪 [EMAIL OTP] REVIEW_MODE — skipping email send");
+
+            return res.status(201).json({
+                success: true,
+                reviewMode: true,
+                token,
+            });
+        }
+
         const logoUrl =
             "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
 
         console.log("🎨 [EMAIL OTP] Preparing email template");
-
-
 
         const emailTemplate = `
 <!DOCTYPE html>
@@ -657,38 +661,29 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 </html>
 `;
 
-
         console.log("📨 [EMAIL OTP] Sending email via Nylas");
 
-        try {
-            await nylas.messages.send({
-                identifier: process.env.USER_GRANT_ID!,
-                requestBody: {
-                    to: [{ name, email }],
-                    subject: "Verify your email address - Stark",
-                    body: emailTemplate,
-                },
-            });
+        await nylas.messages.send({
+            identifier: process.env.USER_GRANT_ID!,
+            requestBody: {
+                to: [{ name, email }],
+                subject: "Verify your email address - Stark",
+                body: emailTemplate,
+            },
+        });
 
-            console.log("✅ [EMAIL OTP] Email sent successfully");
+        console.log("✅ [EMAIL OTP] Email sent successfully");
 
-            res.status(201).json({
-                success: true,
-                token,
-            });
+        res.status(201).json({
+            success: true,
+            token,
+        });
 
-        } catch (error: any) {
-            console.error("❌ [EMAIL OTP] Nylas send failed:", error);
-
-            res.status(400).json({
-                success: false,
-                message: error.message,
-            });
-        }
     } catch (error) {
         console.error("🔥 [EMAIL OTP] Unexpected error:", error);
     }
 };
+
 
 // verifying email otp and creating driver account
 export const verifyingEmailOtp = async (req: Request, res: Response) => {
@@ -705,13 +700,23 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
 
         console.log("🔓 [EMAIL VERIFY] JWT verified successfully");
 
-        if (newDriver.otp !== otp) {
-            console.warn("❌ [EMAIL VERIFY] OTP mismatch");
+        // 🔥 REVIEW MODE — STATIC OTP CHECK
+        if (process.env.REVIEW_MODE === "true") {
+            if (otp !== process.env.REVIEW_STATIC_OTP) {
+                return res.status(400).json({
+                    success: false,
+                    message: "OTP is not correct or expired!",
+                });
+            }
+        } else {
+            if (newDriver.otp !== otp) {
+                console.warn("❌ [EMAIL VERIFY] OTP mismatch");
 
-            return res.status(400).json({
-                success: false,
-                message: "OTP is not correct or expired!",
-            });
+                return res.status(400).json({
+                    success: false,
+                    message: "OTP is not correct or expired!",
+                });
+            }
         }
 
         console.log("✅ [EMAIL VERIFY] OTP matched");
@@ -752,8 +757,6 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
         });
 
         if (existingDriver) {
-            console.warn("🚫 [EMAIL VERIFY] Duplicate detected");
-
             let message = "Duplicate entry detected!";
 
             if (existingDriver.email === email)
@@ -772,8 +775,6 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             return res.status(409).json({ success: false, message });
         }
 
-        console.log("🆕 [EMAIL VERIFY] No duplicates found");
-
         const parseDate = (value: string): Date | null => {
             if (!value) return null;
 
@@ -786,8 +787,6 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             const parsed = new Date(value);
             return isNaN(parsed.getTime()) ? null : parsed;
         };
-
-        console.log("🛠️ [EMAIL VERIFY] Creating driver document");
 
         const Driver = new driver({
             name,
@@ -812,8 +811,6 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
         });
 
         await Driver.save();
-
-        console.log("🎉 [EMAIL VERIFY] Driver saved successfully");
 
         res.status(201).json({
             success: true,

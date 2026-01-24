@@ -402,6 +402,19 @@ const rideRequestSchema = new Schema(
   }
 );
 
+
+const otpSchema = new mongoose.Schema({
+  phone_number: { type: String, required: true, index: true },
+  otp: { type: String, required: true },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+    expires: 300, // ⏱️ 5 minutes
+  },
+});
+
+export const Otp = mongoose.model("Otp", otpSchema);
+
 export const RideRequest = mongoose.model("ride_request", rideRequestSchema);
 
 export const Complaint = mongoose.model("Complaint", complaintSchema);
