@@ -356,7 +356,6 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
         console.log(req.body)
 
         const Driver = await driver.findOne({ phone_number });
-        console.log(Driver)
         if (!Driver) {
             return res.status(404).json({
                 success: false,
