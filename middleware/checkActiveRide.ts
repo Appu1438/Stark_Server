@@ -29,10 +29,8 @@ export const checkActiveRide = async (req: any, res: Response, next: NextFunctio
 
         // 4️⃣ If no driverId AND not login → block
         if (!driverId) {
-            return res.status(401).json({
-                success: false,
-                message: "Driver authentication failed. Driver ID missing.",
-            });
+            return next();
+
         }
 
         // 5️⃣ Check active ride
@@ -50,7 +48,7 @@ export const checkActiveRide = async (req: any, res: Response, next: NextFunctio
             });
         }
 
-        next();
+        return next();
 
     } catch (error) {
         console.error("Active ride check error:", error);

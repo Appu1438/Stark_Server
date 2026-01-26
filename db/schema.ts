@@ -404,14 +404,37 @@ const rideRequestSchema = new Schema(
 
 
 const otpSchema = new mongoose.Schema({
-  phone_number: { type: String, required: true, index: true },
-  otp: { type: String, required: true },
+  phone_number: {
+    type: String,
+    required: true,
+    index: true,
+  },
+
+  otp: {
+    type: String,
+    required: true, // hashed OTP
+  },
+
+  attempts: {
+    type: Number,
+    default: 0,
+  },
+
+  // ⏱️ OTP validity (5 minutes)
+  expiresAt: {
+    type: Date,
+    required: true,
+  },
+
+  // 📆 Record lifetime (1 day)
   createdAt: {
     type: Date,
     default: Date.now,
-    expires: 300, // ⏱️ 5 minutes
+    expires: 86400, // ⏱️ 24 hours
   },
 });
+
+
 
 export const Otp = mongoose.model("Otp", otpSchema);
 

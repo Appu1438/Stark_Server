@@ -1,19 +1,13 @@
 require("dotenv").config();
 import { NextFunction, Request, Response } from "express";
-import twilio from "twilio";
 import jwt from "jsonwebtoken";
 import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
-import { nylas } from "../app";
+import { client, nylas } from "../app";
 import { driver, DriverWallet, Fare, Otp, Ride } from "../db/schema";
 import mongoose from "mongoose";
+import { hashOtp } from "../utils/hashOtp";
+import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
 
-import { generateOtp } from "../utils/generateOtp";
-import { calculateDistance } from "../utils/calculateDistance";
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const client = twilio(accountSid, authToken, {
-    lazyLoading: true,
-});
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
@@ -253,18 +247,33 @@ export const logoutDriver = async (req: Request, res: Response) => {
 
 
 
-// sending otp to driver phone number
-export const sendingOtpToPhone = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-) => {
-    console.log("📲 [LOGIN OTP REQUEST] Started");
+// 📲 Send OTP to driver phone number (login + registration)
+export const sendingOtpToPhone = async (req: Request, res: Response) => {
+    const requestId = Date.now();
+    console.log(`📲 [DRIVER OTP][${requestId}] Request`, req.body);
 
     try {
         const { phone_number } = req.body;
 
-        // 3️⃣ REVIEW MODE
+        /* ---------------- PHONE VALIDATION ---------------- */
+        if (!phone_number || !isValidPhoneNumber(phone_number)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid phone number format",
+            });
+        }
+
+        /* ---------------- DRIVER CHECK ---------------- */
+        const Driver = await driver.findOne({ phone_number });
+
+        if (Driver && !Driver.is_approved) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is not approved yet.",
+            });
+        }
+
+        /* ---------------- REVIEW MODE ---------------- */
         if (process.env.REVIEW_MODE === "true") {
             return res.status(200).json({
                 success: true,
@@ -273,44 +282,81 @@ export const sendingOtpToPhone = async (
             });
         }
 
-        // 4️⃣ Generate OTP
+        /* ---------------- COOLDOWN (60s) ---------------- */
+        const recentOtp = await Otp.findOne({
+            phone_number,
+            createdAt: { $gte: new Date(Date.now() - 60 * 1000) },
+        });
+
+        if (recentOtp) {
+            return res.status(429).json({
+                success: false,
+                message: "Please wait before requesting another OTP",
+            });
+        }
+
+        /* ---------------- DAILY LIMIT (5/day) ---------------- */
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const sentToday = await Otp.countDocuments({
+            phone_number,
+            createdAt: { $gte: today },
+        });
+
+        if (sentToday >= 5) {
+            return res.status(429).json({
+                success: false,
+                message: "Daily OTP limit reached",
+            });
+        }
+
+        /* ---------------- GENERATE OTP ---------------- */
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-        // remove old OTP if any
-        await Otp.deleteMany({ phone_number });
-
-        // save new OTP
         await Otp.create({
             phone_number,
-            otp,
+            otp: hashOtp(otp),
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
         });
 
-        // 6️⃣ Send WhatsApp OTP
+        /* ---------------- SEND WHATSAPP ---------------- */
         await client.messages.create({
-            from: process.env.TWILIO_PHONE_NUMBER!, // +1XXXXXXXXXX (Twilio number)
-            to: phone_number,                      // +91XXXXXXXXXX
-            body: `Your Stark Driver OTP is ${otp}. It expires in 5 minutes.`,
+            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER!}`,
+            to: `whatsapp:${phone_number}`,
+            contentSid: "HX4057f00127a245fe3e76e3ca79990c73",
+            contentVariables: JSON.stringify({ "1": otp }),
         });
 
-        console.log("✅ [LOGIN OTP REQUEST] WhatsApp OTP sent");
+        console.log(`✅ [DRIVER OTP][${requestId}] OTP sent`);
 
-        res.status(200).json({ success: true });
+        return res.status(200).json({
+            success: true,
+            message: "OTP sent successfully",
+        });
 
     } catch (error) {
-        console.error("🔥 [LOGIN OTP REQUEST] Error:", error);
-        res.status(400).json({ success: false });
+        console.error(`🔥 [DRIVER OTP][${requestId}] Error`, error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to send OTP",
+        });
     }
 };
 
 
+
 // verifying otp for login
+// 🔑 Verify OTP for driver login
 export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
     console.log("🔑 [LOGIN OTP] Verification started");
 
     try {
         const { phone_number, otp } = req.body;
+        console.log(req.body)
 
         const Driver = await driver.findOne({ phone_number });
+        console.log(Driver)
         if (!Driver) {
             return res.status(404).json({
                 success: false,
@@ -325,17 +371,14 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // REVIEW MODE
+        /* ---------------- REVIEW MODE ---------------- */
         if (process.env.REVIEW_MODE === "true") {
             if (otp !== process.env.REVIEW_STATIC_OTP) {
                 return res.status(400).json({ success: false, message: "Invalid OTP!" });
             }
         } else {
-
-            const record = await Otp.findOne({
-                phone_number,
-                otp,
-            });
+            const record = await Otp.findOne({ phone_number })
+                .sort({ createdAt: -1 });
 
             if (!record) {
                 return res.status(400).json({
@@ -344,11 +387,35 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 });
             }
 
+            if (record.expiresAt < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "OTP expired!",
+                });
+            }
+
+            if (record.attempts >= 5) {
+                return res.status(429).json({
+                    success: false,
+                    message: "Too many wrong attempts. Please resend OTP.",
+                });
+            }
+
+            if (record.otp !== hashOtp(otp)) {
+                record.attempts += 1;
+                await record.save();
+
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP!",
+                });
+            }
+
             // delete after success
             await Otp.deleteMany({ phone_number });
         }
 
-        // 📱 Device info (UNCHANGED)
+        /* ---------------- DEVICE INFO ---------------- */
         const deviceInfoHeader = req.headers["x-device-info"];
         if (deviceInfoHeader) {
             try {
@@ -368,7 +435,7 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             }
         }
 
-        // 🔐 Tokens (UNCHANGED)
+        /* ---------------- TOKENS ---------------- */
         const accessToken = generateAccessToken(Driver._id);
         const refreshToken = generateRefreshToken(Driver._id);
 
@@ -380,7 +447,7 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             accessToken,
             driver: Driver,
@@ -388,21 +455,23 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
 
     } catch (error) {
         console.error("🔥 [LOGIN OTP] Unexpected error:", error);
-        res.status(400).json({ success: false });
+        return res.status(400).json({ success: false });
     }
 };
 
+
 // verifying phone otp for registration
+// 📝 Verify OTP for driver registration
 export const verifyPhoneOtpForRegistration = async (
     req: Request,
-    res: Response,
-    next: NextFunction
+    res: Response
 ) => {
     console.log("📝 [REGISTER OTP] Verification started");
 
     try {
         const { phone_number, otp } = req.body;
 
+        /* ---------------- REVIEW MODE ---------------- */
         if (process.env.REVIEW_MODE === "true") {
             if (otp !== process.env.REVIEW_STATIC_OTP) {
                 return res.status(400).json({ success: false, message: "Invalid OTP!" });
@@ -411,15 +480,37 @@ export const verifyPhoneOtpForRegistration = async (
             return await sendingOtpToEmail(req, res);
         }
 
-        const record = await Otp.findOne({
-            phone_number,
-            otp,
-        });
+        const record = await Otp.findOne({ phone_number })
+            .sort({ createdAt: -1 });
 
         if (!record) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid or expired OTP!",
+            });
+        }
+
+        if (record.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP expired!",
+            });
+        }
+
+        if (record.attempts >= 5) {
+            return res.status(429).json({
+                success: false,
+                message: "Too many wrong attempts. Please resend OTP.",
+            });
+        }
+
+        if (record.otp !== hashOtp(otp)) {
+            record.attempts += 1;
+            await record.save();
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid OTP!",
             });
         }
 

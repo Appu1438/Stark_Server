@@ -1,16 +1,13 @@
 require("dotenv").config();
 import { NextFunction, Request, Response } from "express";
-import twilio from "twilio";
 import jwt from "jsonwebtoken";
-import { nylas } from "../app";
+import { client, nylas } from "../app";
 import { generateAccessToken, generateRefreshToken } from "../utils/generateToken";
 import { Fare, Otp, Ride, RideRequest, User } from "../db/schema";
 import mongoose from "mongoose";
+import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
+import { hashOtp } from "../utils/hashOtp";
 
-
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const client = twilio(accountSid, authToken, { lazyLoading: true });
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
@@ -85,15 +82,27 @@ export const logout = async (req: Request, res: Response) => {
 
 
 
-// 📌 Register new user (Send OTP via SMS)
 // 📌 Register new user (Send OTP via WhatsApp)
 export const registerUser = async (req: Request, res: Response) => {
+  const requestId = Date.now();
+  console.log(`\n📥 [REGISTER][${requestId}] Request received`);
+  console.log(`📱 [REGISTER][${requestId}] Payload:`, req.body);
+
   try {
     const { phone_number } = req.body;
-    console.log("user", phone_number);
 
-    // 🔥 REVIEW MODE — SKIP WHATSAPP
+    /* ---------------- PHONE VALIDATION ---------------- */
+    if (!phone_number || !isValidPhoneNumber(phone_number)) {
+      console.warn(`❌ [REGISTER][${requestId}] Invalid phone number`, phone_number);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid phone number format",
+      });
+    }
+
+    /* ---------------- REVIEW MODE ---------------- */
     if (process.env.REVIEW_MODE === "true") {
+      console.log(`🧪 [REGISTER][${requestId}] Review mode`);
       return res.status(200).json({
         success: true,
         message: "OTP sent (review mode)",
@@ -101,29 +110,89 @@ export const registerUser = async (req: Request, res: Response) => {
       });
     }
 
-    // 🔐 Generate OTP
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-
-    // 🔄 Remove old OTPs
-    await Otp.deleteMany({ phone_number });
-
-    // 💾 Save OTP (Mongo TTL)
-    await Otp.create({ phone_number, otp });
-
-    // 📲 Send WhatsApp OTP
-    await client.messages.create({
-      from: process.env.TWILIO_PHONE_NUMBER!, // +1XXXXXXXXXX (Twilio number)
-      to: phone_number,                      // +91XXXXXXXXXX
-      body: `Your Stark Login OTP is ${otp}. It expires in 5 minutes.`,
+    /* ---------------- COOLDOWN (60s) ---------------- */
+    const recentOtp = await Otp.findOne({
+      phone_number,
+      createdAt: { $gte: new Date(Date.now() - 60 * 1000) },
     });
 
-    return res.status(201).json({ success: true });
+    if (recentOtp) {
+      console.warn(`⏱️ [REGISTER][${requestId}] Cooldown hit`);
+      return res.status(429).json({
+        success: false,
+        message: "Please wait before requesting another OTP",
+      });
+    }
+
+    /* ---------------- DAILY LIMIT (5/day) ---------------- */
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sentToday = await Otp.countDocuments({
+      phone_number,
+      createdAt: { $gte: today },
+    });
+
+    console.log(`📊 [REGISTER][${requestId}] OTPs today:`, sentToday);
+
+    if (sentToday >= 5) {
+      console.warn(`🚫 [REGISTER][${requestId}] Daily limit reached`);
+      return res.status(429).json({
+        success: false,
+        message: "Daily OTP limit reached",
+      });
+    }
+
+    /* ---------------- GENERATE OTP ---------------- */
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const hashedOtp = hashOtp(otp);
+
+    await Otp.create({
+      phone_number,
+      otp: hashedOtp,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min validity
+
+    });
+
+    console.log(`💾 [REGISTER][${requestId}] OTP saved`);
+
+    /* ---------------- SEND WHATSAPP ---------------- */
+    try {
+      await client.messages.create({
+        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER!}`,
+        to: `whatsapp:${phone_number}`,
+        contentSid: "HX4057f00127a245fe3e76e3ca79990c73",
+        contentVariables: JSON.stringify({ "1": otp }),
+      });
+
+      console.log(`✅ [REGISTER][${requestId}] WhatsApp OTP accepted by Twilio`);
+    } catch (twilioError: any) {
+      console.error(`❌ [REGISTER][${requestId}] Twilio error`, {
+        code: twilioError.code,
+        message: twilioError.message,
+      });
+
+      // ⚠️ Do NOT retry WhatsApp here
+      return res.status(500).json({
+        success: false,
+        message: "OTP sending failed. Please try again.",
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "OTP sent successfully",
+    });
 
   } catch (error) {
-    console.error(error);
-    res.status(400).json({ success: false });
+    console.error(`🔥 [REGISTER][${requestId}] Error`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
+
 
 
 // 📌 Verify OTP & login/register
@@ -131,71 +200,98 @@ export const verifyOtp = async (req: Request, res: Response) => {
   try {
     const { phone_number, otp } = req.body;
 
-    // 🔥 REVIEW MODE — STATIC OTP
+    if (!phone_number || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and OTP required",
+      });
+    }
+
+    /* ---------------- REVIEW MODE ---------------- */
     if (process.env.REVIEW_MODE === "true") {
       if (otp !== process.env.REVIEW_STATIC_OTP) {
+        return res.status(400).json({
+          success: false, message: "OTP expired or invalid",
+        });
+      }
+    } else {
+      const record = await Otp.findOne({ phone_number })
+        .sort({ createdAt: -1 });
+
+      if (!record) {
+        return res.status(400).json({
+          success: false,
+          message: "OTP expired or invalid",
+        });
+      }
+
+      // ⏱️ OTP expired?
+      if (record.expiresAt < new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: "OTP expired",
+        });
+      }
+
+      /* --------- BRUTE FORCE PROTECTION --------- */
+      if (record.attempts >= 5) {
+        return res.status(429).json({
+          success: false,
+          message: "Too many wrong attempts. Resend OTP and try again.",
+        });
+      }
+
+      if (record.otp !== hashOtp(otp)) {
+        record.attempts += 1;
+        await record.save();
+
         return res.status(400).json({
           success: false,
           message: "Invalid OTP",
         });
       }
-    } else {
-      // 🔐 Verify OTP from DB
-      const record = await Otp.findOne({ phone_number, otp });
 
-      if (!record) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP",
-        });
-      }
-
-      // 🧹 Remove OTP after success
+      /* --------- OTP SUCCESS --------- */
       await Otp.deleteMany({ phone_number });
     }
 
-    let existingUser = await User.findOne({ phone_number });
+    /* ---------------- USER LOGIN / REGISTER ---------------- */
+    let user = await User.findOne({ phone_number });
+    if (!user) user = await User.create({ phone_number });
 
-    if (!existingUser) {
-      existingUser = await User.create({ phone_number });
-    }
-
-    if (!existingUser.is_approved) {
+    if (!user.is_approved) {
       return res.status(403).json({
         success: false,
-        message: "Your account is suspended. please contact support.",
+        message: "Your account is suspended",
       });
     }
 
-    const userData = existingUser.toObject();
-    userData.id = userData._id;
-    delete userData._id;
-
-    const accessToken = generateAccessToken(userData.id);
-    const refreshToken = generateRefreshToken(userData.id);
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
 
     res.cookie("userRefreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      path: "/",
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     return res.status(200).json({
       success: true,
       accessToken,
-      user: userData,
+      user,
     });
 
   } catch (error) {
-    console.error(error);
-    return res.status(400).json({
+    console.error("🔥 [VERIFY OTP] Error", error);
+    return res.status(500).json({
       success: false,
-      message: "Invalid OTP",
+      message: "OTP verification failed",
     });
   }
 };
+
+
 
 
 
