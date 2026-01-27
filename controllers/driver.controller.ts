@@ -350,14 +350,21 @@ export const sendingOtpToPhone = async (req: Request, res: Response) => {
 // verifying otp for login
 // 🔑 Verify OTP for driver login
 export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
-    console.log("🔑 [LOGIN OTP] Verification started");
+    const requestId = Date.now();
+    console.log(`🚚🔑 [DRIVER LOGIN OTP][${requestId}] Verification started`);
 
     try {
         const { phone_number, otp } = req.body;
-        console.log(req.body)
+
+        console.log(`📥 [DRIVER LOGIN OTP][${requestId}] Payload received`, {
+            phone_number,
+            otpProvided: Boolean(otp),
+        });
 
         const Driver = await driver.findOne({ phone_number });
+
         if (!Driver) {
+            console.warn(`❌ [DRIVER LOGIN OTP][${requestId}] Driver not found`);
             return res.status(404).json({
                 success: false,
                 message: "No account found please signup first.",
@@ -365,6 +372,9 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
         }
 
         if (!Driver.is_approved) {
+            console.warn(`🚫 [DRIVER LOGIN OTP][${requestId}] Driver not approved`, {
+                driverId: Driver._id,
+            });
             return res.status(403).json({
                 success: false,
                 message: "Your account is not approved yet.",
@@ -373,21 +383,36 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
 
         /* ---------------- REVIEW MODE ---------------- */
         if (process.env.REVIEW_MODE === "true") {
+            console.log(`🧪 [DRIVER LOGIN OTP][${requestId}] Review mode enabled`);
+
             if (otp !== process.env.REVIEW_STATIC_OTP) {
-                return res.status(400).json({ success: false, message: "Invalid OTP!" });
+                console.warn(`❌ [DRIVER LOGIN OTP][${requestId}] Invalid review OTP`);
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP!",
+                });
             }
         } else {
+            console.log(`🔎 [DRIVER LOGIN OTP][${requestId}] Fetching OTP record`);
+
             const record = await Otp.findOne({ phone_number })
                 .sort({ createdAt: -1 });
 
             if (!record) {
+                console.warn(`❌ [DRIVER LOGIN OTP][${requestId}] OTP record not found`);
                 return res.status(400).json({
                     success: false,
                     message: "Invalid or expired OTP!",
                 });
             }
 
+            console.log(`📄 [DRIVER LOGIN OTP][${requestId}] OTP record found`, {
+                attempts: record.attempts,
+                expiresAt: record.expiresAt,
+            });
+
             if (record.expiresAt < new Date()) {
+                console.warn(`⏰ [DRIVER LOGIN OTP][${requestId}] OTP expired`);
                 return res.status(400).json({
                     success: false,
                     message: "OTP expired!",
@@ -395,6 +420,7 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             }
 
             if (record.attempts >= 5) {
+                console.warn(`🚫 [DRIVER LOGIN OTP][${requestId}] Too many attempts`);
                 return res.status(429).json({
                     success: false,
                     message: "Too many wrong attempts. Please resend OTP.",
@@ -405,20 +431,29 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 record.attempts += 1;
                 await record.save();
 
+                console.warn(`❌ [DRIVER LOGIN OTP][${requestId}] Invalid OTP`, {
+                    attempts: record.attempts,
+                });
+
                 return res.status(400).json({
                     success: false,
                     message: "Invalid OTP!",
                 });
             }
 
-            // delete after success
+            console.log(`✅ [DRIVER LOGIN OTP][${requestId}] OTP verified`);
+
             await Otp.deleteMany({ phone_number });
+            console.log(`🧹 [DRIVER LOGIN OTP][${requestId}] OTP records cleared`);
         }
 
         /* ---------------- DEVICE INFO ---------------- */
         const deviceInfoHeader = req.headers["x-device-info"];
+
         if (deviceInfoHeader) {
             try {
+                console.log(`📱 [DRIVER LOGIN OTP][${requestId}] Parsing device info`);
+
                 const deviceInfo = JSON.parse(deviceInfoHeader as string);
 
                 Driver.activeDevice = {
@@ -430,12 +465,16 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
                 };
 
                 await Driver.save();
+
+                console.log(`✅ [DRIVER LOGIN OTP][${requestId}] Device info saved`);
             } catch (err) {
-                console.error("❌ Device info parse error:", err);
+                console.error(`❌ [DRIVER LOGIN OTP][${requestId}] Device info parse error`, err);
             }
         }
 
         /* ---------------- TOKENS ---------------- */
+        console.log(`🔑 [DRIVER LOGIN OTP][${requestId}] Generating tokens`);
+
         const accessToken = generateAccessToken(Driver._id);
         const refreshToken = generateRefreshToken(Driver._id);
 
@@ -447,17 +486,26 @@ export const verifyPhoneOtpForLogin = async (req: Request, res: Response) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
+        console.log(`🎉 [DRIVER LOGIN OTP][${requestId}] Login successful`, {
+            driverId: Driver._id,
+        });
+
         return res.status(201).json({
             success: true,
             accessToken,
             driver: Driver,
         });
 
-    } catch (error) {
-        console.error("🔥 [LOGIN OTP] Unexpected error:", error);
+    } catch (error: any) {
+        console.error(`🔥 [DRIVER LOGIN OTP][${requestId}] Unexpected error`, {
+            message: error.message,
+            code: error.code,
+        });
+
         return res.status(400).json({ success: false });
     }
 };
+
 
 
 // verifying phone otp for registration
@@ -466,31 +514,53 @@ export const verifyPhoneOtpForRegistration = async (
     req: Request,
     res: Response
 ) => {
-    console.log("📝 [REGISTER OTP] Verification started");
+    const requestId = Date.now();
+    console.log(`🚚📝 [DRIVER REGISTER OTP][${requestId}] Verification started`);
 
     try {
         const { phone_number, otp } = req.body;
 
+        console.log(`📥 [DRIVER REGISTER OTP][${requestId}] Payload received`, {
+            phone_number,
+            otpProvided: Boolean(otp),
+        });
+
         /* ---------------- REVIEW MODE ---------------- */
         if (process.env.REVIEW_MODE === "true") {
+            console.log(`🧪 [DRIVER REGISTER OTP][${requestId}] Review mode enabled`);
+
             if (otp !== process.env.REVIEW_STATIC_OTP) {
-                return res.status(400).json({ success: false, message: "Invalid OTP!" });
+                console.warn(`❌ [DRIVER REGISTER OTP][${requestId}] Invalid review OTP`);
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid OTP!",
+                });
             }
 
+            console.log(`📧 [DRIVER REGISTER OTP][${requestId}] Review OTP verified → sending email OTP`);
             return await sendingOtpToEmail(req, res);
         }
+
+        console.log(`🔎 [DRIVER REGISTER OTP][${requestId}] Fetching OTP record`);
 
         const record = await Otp.findOne({ phone_number })
             .sort({ createdAt: -1 });
 
         if (!record) {
+            console.warn(`❌ [DRIVER REGISTER OTP][${requestId}] OTP record not found`);
             return res.status(400).json({
                 success: false,
                 message: "Invalid or expired OTP!",
             });
         }
 
+        console.log(`📄 [DRIVER REGISTER OTP][${requestId}] OTP record found`, {
+            attempts: record.attempts,
+            expiresAt: record.expiresAt,
+        });
+
         if (record.expiresAt < new Date()) {
+            console.warn(`⏰ [DRIVER REGISTER OTP][${requestId}] OTP expired`);
             return res.status(400).json({
                 success: false,
                 message: "OTP expired!",
@@ -498,6 +568,7 @@ export const verifyPhoneOtpForRegistration = async (
         }
 
         if (record.attempts >= 5) {
+            console.warn(`🚫 [DRIVER REGISTER OTP][${requestId}] Too many attempts`);
             return res.status(429).json({
                 success: false,
                 message: "Too many wrong attempts. Please resend OTP.",
@@ -508,19 +579,30 @@ export const verifyPhoneOtpForRegistration = async (
             record.attempts += 1;
             await record.save();
 
+            console.warn(`❌ [DRIVER REGISTER OTP][${requestId}] Invalid OTP`, {
+                attempts: record.attempts,
+            });
+
             return res.status(400).json({
                 success: false,
                 message: "Invalid OTP!",
             });
         }
 
-        // delete after success
-        await Otp.deleteMany({ phone_number });
+        console.log(`✅ [DRIVER REGISTER OTP][${requestId}] OTP verified`);
 
+        await Otp.deleteMany({ phone_number });
+        console.log(`🧹 [DRIVER REGISTER OTP][${requestId}] OTP records cleared`);
+
+        console.log(`📧 [DRIVER REGISTER OTP][${requestId}] Sending email OTP`);
         await sendingOtpToEmail(req, res);
 
-    } catch (error) {
-        console.error("🔥 [REGISTER OTP] Unexpected error:", error);
+    } catch (error: any) {
+        console.error(`🔥 [DRIVER REGISTER OTP][${requestId}] Unexpected error`, {
+            message: error.message,
+            code: error.code,
+        });
+
         res.status(400).json({ success: false });
     }
 };

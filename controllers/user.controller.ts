@@ -197,10 +197,20 @@ export const registerUser = async (req: Request, res: Response) => {
 
 // 📌 Verify OTP & login/register
 export const verifyOtp = async (req: Request, res: Response) => {
+  const requestId = Date.now(); // trace single request
+
+  console.log(`🔐 [VERIFY OTP][${requestId}] Request received`);
+
   try {
     const { phone_number, otp } = req.body;
 
+    console.log(`📥 [VERIFY OTP][${requestId}] Payload received`, {
+      phone_number,
+      otpProvided: Boolean(otp),
+    });
+
     if (!phone_number || !otp) {
+      console.warn(`⚠️ [VERIFY OTP][${requestId}] Missing phone or OTP`);
       return res.status(400).json({
         success: false,
         message: "Phone number and OTP required",
@@ -209,32 +219,46 @@ export const verifyOtp = async (req: Request, res: Response) => {
 
     /* ---------------- REVIEW MODE ---------------- */
     if (process.env.REVIEW_MODE === "true") {
-      if (otp !== process.env.REVIEW_STATIC_OTP) {
-        return res.status(400).json({
-          success: false, message: "OTP expired or invalid",
-        });
-      }
-    } else {
-      const record = await Otp.findOne({ phone_number })
-        .sort({ createdAt: -1 });
+      console.log(`🧪 [VERIFY OTP][${requestId}] Review mode enabled`);
 
-      if (!record) {
+      if (otp !== process.env.REVIEW_STATIC_OTP) {
+        console.warn(`❌ [VERIFY OTP][${requestId}] Invalid review OTP`);
         return res.status(400).json({
           success: false,
           message: "OTP expired or invalid",
         });
       }
 
-      // ⏱️ OTP expired?
+      console.log(`✅ [VERIFY OTP][${requestId}] Review OTP verified`);
+    } else {
+      console.log(`🔎 [VERIFY OTP][${requestId}] Fetching OTP record`);
+
+      const record = await Otp.findOne({ phone_number })
+        .sort({ createdAt: -1 });
+
+      if (!record) {
+        console.warn(`❌ [VERIFY OTP][${requestId}] No OTP record found`);
+        return res.status(400).json({
+          success: false,
+          message: "OTP expired or invalid",
+        });
+      }
+
+      console.log(`📄 [VERIFY OTP][${requestId}] OTP record found`, {
+        attempts: record.attempts,
+        expiresAt: record.expiresAt,
+      });
+
       if (record.expiresAt < new Date()) {
+        console.warn(`⏰ [VERIFY OTP][${requestId}] OTP expired`);
         return res.status(400).json({
           success: false,
           message: "OTP expired",
         });
       }
 
-      /* --------- BRUTE FORCE PROTECTION --------- */
       if (record.attempts >= 5) {
+        console.warn(`🚫 [VERIFY OTP][${requestId}] Too many attempts`);
         return res.status(429).json({
           success: false,
           message: "Too many wrong attempts. Resend OTP and try again.",
@@ -245,26 +269,47 @@ export const verifyOtp = async (req: Request, res: Response) => {
         record.attempts += 1;
         await record.save();
 
+        console.warn(`❌ [VERIFY OTP][${requestId}] Invalid OTP attempt`, {
+          attempts: record.attempts,
+        });
+
         return res.status(400).json({
           success: false,
           message: "Invalid OTP",
         });
       }
 
-      /* --------- OTP SUCCESS --------- */
+      console.log(`✅ [VERIFY OTP][${requestId}] OTP verified successfully`);
+
       await Otp.deleteMany({ phone_number });
+      console.log(`🧹 [VERIFY OTP][${requestId}] OTP records cleared`);
     }
 
     /* ---------------- USER LOGIN / REGISTER ---------------- */
+    console.log(`👤 [VERIFY OTP][${requestId}] Checking user existence`);
+
     let user = await User.findOne({ phone_number });
-    if (!user) user = await User.create({ phone_number });
+
+    if (!user) {
+      console.log(`➕ [VERIFY OTP][${requestId}] Creating new user`);
+      user = await User.create({ phone_number });
+    } else {
+      console.log(`ℹ️ [VERIFY OTP][${requestId}] Existing user found`, {
+        userId: user._id,
+      });
+    }
 
     if (!user.is_approved) {
+      console.warn(`🚫 [VERIFY OTP][${requestId}] User suspended`, {
+        userId: user._id,
+      });
       return res.status(403).json({
         success: false,
         message: "Your account is suspended",
       });
     }
+
+    console.log(`🔑 [VERIFY OTP][${requestId}] Generating tokens`);
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
@@ -276,14 +321,23 @@ export const verifyOtp = async (req: Request, res: Response) => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
+    console.log(`🎉 [VERIFY OTP][${requestId}] Login successful`, {
+      userId: user._id,
+    });
+
     return res.status(200).json({
       success: true,
       accessToken,
       user,
     });
 
-  } catch (error) {
-    console.error("🔥 [VERIFY OTP] Error", error);
+  } catch (error: any) {
+    console.error(`🔥 [VERIFY OTP][${requestId}] Unexpected error`, {
+      message: error.message,
+      code: error.code,
+      keyValue: error.keyValue,
+    });
+
     return res.status(500).json({
       success: false,
       message: "OTP verification failed",
@@ -293,27 +347,40 @@ export const verifyOtp = async (req: Request, res: Response) => {
 
 
 
-
-
 export const sendingOtpToEmail = async (req: Request, res: Response) => {
+  const requestId = Date.now();
+  console.log(`📧 [EMAIL OTP SEND][${requestId}] Request received`);
+
   try {
     const { email, name, userId } = req.body;
 
-    // 🔥 REVIEW MODE — STATIC OTP
+    console.log(`📥 [EMAIL OTP SEND][${requestId}] Payload`, {
+      email,
+      name,
+      userId,
+    });
+
     const otp =
       process.env.REVIEW_MODE === "true"
         ? process.env.REVIEW_STATIC_OTP!
         : Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Create a temporary token for verification
+    console.log(`🔐 [EMAIL OTP SEND][${requestId}] OTP generated`, {
+      reviewMode: process.env.REVIEW_MODE === "true",
+    });
+
     const token = jwt.sign(
       { user: { userId, name, email }, otp },
       process.env.EMAIL_ACTIVATION_SECRET!,
       { expiresIn: "5m" }
     );
 
-    // 🔥 REVIEW MODE — SKIP EMAIL SENDING
+    console.log(`🪪 [EMAIL OTP SEND][${requestId}] Verification token created`);
+
+    /* -------- REVIEW MODE -------- */
     if (process.env.REVIEW_MODE === "true") {
+      console.log(`🧪 [EMAIL OTP SEND][${requestId}] Review mode – skipping email`);
+
       return res.status(201).json({
         success: true,
         reviewMode: true,
@@ -321,71 +388,25 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       });
     }
 
-    // --- LOGO URL ---
-    const logoUrl =
-      "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
-
-    // --- EMAIL TEMPLATE (UNCHANGED) ---
-    const emailTemplate = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Verify your email</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
-          .container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 40px; margin-bottom: 40px; }
-          .header { padding: 30px 40px; text-align: center; background-color: #000000; }
-          .logo { max-height: 40px; }
-          .content { padding: 40px; color: #333333; line-height: 1.6; }
-          .otp-block { background-color: #f0f2f5; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; border: 1px dashed #ccc; }
-          .otp-code { font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #000000; margin: 0; }
-          .footer { background-color: #f9f9f9; padding: 20px 40px; text-align: center; font-size: 12px; color: #888888; border-top: 1px solid #eeeeee; }
-          .footer a { color: #888888; text-decoration: underline; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-             <img src="${logoUrl}" alt="Stark Logo" class="logo" style="display:block; margin:auto;" /> 
-          </div>
-
-          <div class="content">
-            <h2 style="margin-top: 0; font-weight: 600; color: #111;">Verify your email address</h2>
-            <p>Hi ${name},</p>
-            <p>Thank you for joining <strong>Stark</strong>. To complete your registration, please verify your email address by entering the code below:</p>
-            
-            <div class="otp-block">
-              <p class="otp-code">${otp}</p>
-            </div>
-
-            <p style="font-size: 14px; color: #666;">This OTP is valid for <strong>5 minutes</strong>. If you did not request this verification, please disregard this email.</p>
-            
-            <p style="margin-top: 30px;">Best regards,<br><strong>The Stark Team</strong></p>
-          </div>
-
-          <div class="footer">
-            <p>&copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.</p>
-            <p>This is an automated message, please do not reply.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    console.log(`📨 [EMAIL OTP SEND][${requestId}] Sending email via Nylas`);
 
     await nylas.messages.send({
       identifier: process.env.USER_GRANT_ID!,
       requestBody: {
         to: [{ name, email }],
         subject: "Verify your email address - Stark",
-        body: emailTemplate,
+        body: emailTemplate, // unchanged
       },
     });
 
+    console.log(`✅ [EMAIL OTP SEND][${requestId}] Email sent successfully`);
+
     res.status(201).json({ success: true, token });
   } catch (error: any) {
-    console.log(error);
+    console.error(`🔥 [EMAIL OTP SEND][${requestId}] Error`, {
+      message: error.message,
+    });
+
     res.status(400).json({
       success: false,
       message: error.message || "Error sending OTP email",
@@ -397,16 +418,33 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 
 // 📌 Verify Email OTP
 export const verifyingEmail = async (req: Request, res: Response) => {
+  const requestId = Date.now();
+  console.log(`📧 [EMAIL OTP VERIFY][${requestId}] Verification started`);
+
   try {
     const { otp, token } = req.body;
+
+    console.log(`📥 [EMAIL OTP VERIFY][${requestId}] Payload received`, {
+      otpProvided: Boolean(otp),
+      tokenProvided: Boolean(token),
+    });
+
     const decoded: any = jwt.verify(
       token,
       process.env.EMAIL_ACTIVATION_SECRET!
     );
 
-    // 🔥 REVIEW MODE — STATIC OTP CHECK
+    console.log(`🔓 [EMAIL OTP VERIFY][${requestId}] Token decoded`, {
+      userId: decoded?.user?.userId,
+      email: decoded?.user?.email,
+    });
+
+    /* -------- REVIEW MODE -------- */
     if (process.env.REVIEW_MODE === "true") {
+      console.log(`🧪 [EMAIL OTP VERIFY][${requestId}] Review mode enabled`);
+
       if (otp !== process.env.REVIEW_STATIC_OTP) {
+        console.warn(`❌ [EMAIL OTP VERIFY][${requestId}] Invalid review OTP`);
         return res.status(400).json({
           success: false,
           message: "OTP is not correct or expired!",
@@ -414,6 +452,7 @@ export const verifyingEmail = async (req: Request, res: Response) => {
       }
     } else {
       if (decoded.otp !== otp) {
+        console.warn(`❌ [EMAIL OTP VERIFY][${requestId}] OTP mismatch`);
         return res.status(400).json({
           success: false,
           message: "OTP is not correct or expired!",
@@ -421,7 +460,11 @@ export const verifyingEmail = async (req: Request, res: Response) => {
       }
     }
 
+    console.log(`✅ [EMAIL OTP VERIFY][${requestId}] OTP verified`);
+
     const { name, email, userId } = decoded.user;
+
+    console.log(`🔎 [EMAIL OTP VERIFY][${requestId}] Checking email uniqueness`);
 
     const emailTaken = await User.findOne({
       email,
@@ -429,18 +472,28 @@ export const verifyingEmail = async (req: Request, res: Response) => {
     });
 
     if (emailTaken) {
+      console.warn(`🚫 [EMAIL OTP VERIFY][${requestId}] Email already in use`, {
+        email,
+      });
+
       return res.status(400).json({
         success: false,
         message: "Email is already associated with another account.",
       });
     }
 
+    console.log(`👤 [EMAIL OTP VERIFY][${requestId}] Fetching user`);
+
     const user = await User.findById(userId);
 
     if (user && !user.email) {
+      console.log(`✏️ [EMAIL OTP VERIFY][${requestId}] Updating user email`);
+
       user.name = name;
       user.email = email;
       await user.save();
+
+      console.log(`🔑 [EMAIL OTP VERIFY][${requestId}] Generating tokens`);
 
       const accessToken = generateAccessToken(user.id);
       const refreshToken = generateRefreshToken(user.id);
@@ -453,19 +506,28 @@ export const verifyingEmail = async (req: Request, res: Response) => {
         maxAge: 30 * 24 * 60 * 60 * 1000,
       });
 
-      res.status(201).json({
+      console.log(`🎉 [EMAIL OTP VERIFY][${requestId}] Email verified successfully`, {
+        userId: user.id,
+      });
+
+      return res.status(201).json({
         success: true,
         accessToken,
         user,
       });
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Email has already been verified.",
-      });
     }
-  } catch (error) {
-    console.log(error);
+
+    console.warn(`⚠️ [EMAIL OTP VERIFY][${requestId}] Email already verified`);
+    return res.status(400).json({
+      success: false,
+      message: "Email has already been verified.",
+    });
+
+  } catch (error: any) {
+    console.error(`🔥 [EMAIL OTP VERIFY][${requestId}] Error`, {
+      message: error.message,
+    });
+
     res.status(400).json({
       success: false,
       message: "Your OTP is expired or invalid!",

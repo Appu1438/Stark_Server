@@ -187,7 +187,7 @@ const rideSchema = new Schema(
 const userSchema = new Schema({
   name: String,
   phone_number: { type: String, unique: true },
-  email: { type: String, unique: true },
+  email: { type: String, unique: true, sparse: true, default: undefined },
   notificationToken: { type: String, default: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
 
   is_approved: { type: Boolean, default: true },
