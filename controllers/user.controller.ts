@@ -612,7 +612,7 @@ export const verifyingEmail = async (req: Request, res: Response) => {
 
     const user = await User.findById(userId);
 
-    if (user && !user.email) {
+    if (user && (!user.email || user.email === null || user.email === "")) {
       console.log(`✏️ [EMAIL OTP VERIFY][${requestId}] Updating user email`);
 
       user.name = name;
@@ -643,7 +643,7 @@ export const verifyingEmail = async (req: Request, res: Response) => {
       });
     }
 
-    console.warn(`⚠️ [EMAIL OTP VERIFY][${requestId}] Email already verified`);
+    console.warn(`⚠️ [EMAIL OTP VERIFY][${requestId}] Email already verified for this account`);
     return res.status(400).json({
       success: false,
       message: "Email has already been verified.",
