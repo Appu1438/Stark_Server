@@ -388,6 +388,132 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       });
     }
 
+    // --- LOGO URL ---
+    const logoUrl =
+      "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+
+    // --- EMAIL TEMPLATE ---
+    const emailTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verify your email</title>
+
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f4f4f7;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    .header {
+      padding: 30px 40px;
+      text-align: center;
+      background-color: #000000;
+    }
+
+    .logo {
+      max-height: 40px;
+    }
+
+    .content {
+      padding: 40px;
+      color: #333333;
+      line-height: 1.6;
+    }
+
+    .otp-block {
+      background-color: #f0f2f5;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin: 30px 0;
+      border: 1px dashed #cccccc;
+    }
+
+    .otp-code {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 8px;
+      color: #000000;
+      margin: 0;
+    }
+
+    .footer {
+      background-color: #f9f9f9;
+      padding: 20px 40px;
+      text-align: center;
+      font-size: 12px;
+      color: #888888;
+      border-top: 1px solid #eeeeee;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <img
+        src="${logoUrl}"
+        alt="Stark Logo"
+        class="logo"
+        style="display: block; margin: auto;"
+      />
+    </div>
+
+    <div class="content">
+      <h2 style="margin-top: 0; font-weight: 600; color: #111;">
+        Verify your email address
+      </h2>
+
+      <p>Hi ${name},</p>
+
+      <p>
+        Thank you for joining <strong>Stark</strong>. To complete your
+        registration, please verify your email address by entering the code
+        below:
+      </p>
+
+      <div class="otp-block">
+        <p class="otp-code">${otp}</p>
+      </div>
+
+      <p style="font-size: 14px; color: #666;">
+        This OTP is valid for <strong>5 minutes</strong>. If you did not request
+        this verification, please disregard this email.
+      </p>
+
+      <p style="margin-top: 30px;">
+        Best regards,<br />
+        <strong>The Stark Team</strong>
+      </p>
+    </div>
+
+    <div class="footer">
+      <p>
+        &copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.
+      </p>
+      <p>This is an automated message, please do not reply.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
     console.log(`📨 [EMAIL OTP SEND][${requestId}] Sending email via Nylas`);
 
     await nylas.messages.send({
