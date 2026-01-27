@@ -314,6 +314,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
+    let userData = user?.toObject();
+    userData.id = userData._id;
+
     res.cookie("userRefreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -328,7 +331,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     return res.status(200).json({
       success: true,
       accessToken,
-      user,
+      user: userData,
     });
 
   } catch (error: any) {
