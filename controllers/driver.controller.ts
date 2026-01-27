@@ -332,14 +332,15 @@ export const sendingOtpToPhone = async (req: Request, res: Response) => {
 
         return res.status(200).json({
             success: true,
-            message: "OTP sent successfully",
+            message: "OTP has been sent to your Whatsapp number.",
         });
+
 
     } catch (error) {
         console.error(`🔥 [DRIVER OTP][${requestId}] Error`, error);
         return res.status(500).json({
             success: false,
-            message: "Failed to send OTP",
+            message: "Failed to send OTP. Please try again after sometime.",
         });
     }
 };
