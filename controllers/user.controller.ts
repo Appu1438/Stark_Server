@@ -181,14 +181,14 @@ export const registerUser = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       success: true,
-      message: "OTP has been sent to your Whatsapp number.",
+      message: "OTP has been sent to your Whatsapp number",
     });
 
   } catch (error) {
     console.error(`🔥 [REGISTER][${requestId}] Error`, error);
     return res.status(500).json({
       success: false,
-      message: "Failed to send OTP. Please try again after sometime.",
+      message: "Failed to send OTP. Please try again after sometimes",
     });
   }
 };
