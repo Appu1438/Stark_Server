@@ -7,6 +7,7 @@ import { driver, DriverWallet, Fare, Otp, Ride } from "../db/schema";
 import mongoose from "mongoose";
 import { hashOtp } from "../utils/hashOtp";
 import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
+import { getRegistrationBonus } from "../utils/getBonus";
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
@@ -967,6 +968,26 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
         });
 
         await Driver.save();
+
+        // 🎁 REGISTRATION BONUS
+        const bonusAmount = getRegistrationBonus(vehicle_type);
+
+        await DriverWallet.create({
+            driverId: Driver._id,
+            balance: bonusAmount,
+            history: [
+                {
+                    type: "credit",
+                    action: "bonus",
+                    amount: bonusAmount,
+                    referenceId: "REGISTRATION",
+                    meta: { reason: "Signup Bonus", vehicle: vehicle_type },
+                    balanceAfter: bonusAmount,
+                    actionOn: new Date(),
+                },
+            ],
+        });
+
 
         res.status(201).json({
             success: true,

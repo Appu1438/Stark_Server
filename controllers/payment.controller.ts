@@ -10,10 +10,6 @@ const razorpay = new Razorpay({
 
 const activeOrders = new Map<string, number>();
 
-const getRandomBonus = () => {
-  return Math.floor(Math.random() * (500 - 250 + 1)) + 250;
-};
-
 
 // ✅ Create Razorpay Order
 export const createOrder = async (req: Request, res: Response) => {
@@ -190,10 +186,12 @@ export const createPaymentLink = async (req: Request, res: Response) => {
 
     // 🟡 Wallet check
     const driverWallet = await DriverWallet.findOne({ driverId });
-    const isFirstRecharge =
-      !driverWallet || !driverWallet.history || driverWallet.history.length === 0;
+    const hasAnyRecharge =
+      driverWallet?.history?.some(
+        (h: any) => h.action === "recharge"
+      ) ?? false;
 
-
+    const isFirstRecharge = !hasAnyRecharge;
 
     const firstRechargeMin = Driver.vehicle_type === "Auto" ? 500 : 1000;
     const minRecharge = 250;
@@ -322,27 +320,6 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
 
     console.log("🧾 No duplicate transaction found");
 
-    // 🧠 WALLET FETCH
-    console.log("👛 Fetching driver wallet...");
-    const wallet = await DriverWallet.findOne({ driverId });
-
-    const isFirstRecharge =
-      !wallet || !wallet.history || wallet.history.length === 0;
-
-    console.log("🔎 Is first recharge:", isFirstRecharge);
-
-    // 🎁 BONUS LOGIC
-    const bonusAmount = isFirstRecharge ? getRandomBonus() : 0;
-    const totalCredit = netAmount + bonusAmount;
-
-    if (bonusAmount > 0) {
-      console.log("🎁 First recharge bonus generated:", bonusAmount);
-    } else {
-      console.log("🚫 Bonus not applicable");
-    }
-
-    console.log("➕ Total credit to wallet:", totalCredit);
-
     // 💰 WALLET UPDATE
     console.log("💾 Updating wallet atomically...");
     const updatedWallet = await DriverWallet.findOneAndUpdate(
@@ -350,7 +327,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       [
         {
           $set: {
-            balance: { $add: ["$balance", totalCredit] },
+            balance: { $add: ["$balance", netAmount] },
             history: {
               $concatArrays: [
                 "$history",
@@ -362,22 +339,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
                     referenceId: payment.id,
                     balanceAfter: { $add: ["$balance", netAmount] },
                     actionOn: new Date(),
-                  },
-                  ...(bonusAmount > 0
-                    ? [
-                      {
-                        type: "credit",
-                        action: "bonus",
-                        amount: bonusAmount,
-                        referenceId: payment.id,
-                        meta: { reason: "First Recharge Bonus" },
-                        balanceAfter: {
-                          $add: ["$balance", totalCredit],
-                        },
-                        actionOn: new Date(),
-                      },
-                    ]
-                    : []),
+                  }
                 ],
               ],
             },
@@ -396,7 +358,6 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       driverId,
       grossAmount: payment.amount / 100,
       netAmount,
-      bonusAmount,
       paymentId: payment.id,
       status: "success",
     });
@@ -407,7 +368,6 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
     return res.json({
       status: "ok",
       wallet: updatedWallet.balance,
-      bonusCredited: bonusAmount,
     });
   } catch (error) {
     console.error("🔥 Razorpay webhook error:", error);
