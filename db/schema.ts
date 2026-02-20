@@ -96,6 +96,8 @@ const driverSchema = new Schema({
   },
 
   vehicle_type: { type: String, enum: ["Hatchback", "Sedan", "Suv", "Auto"] },
+  vehicle_brand: String,
+  vehicle_model: String,
   registration_number: { type: String, unique: true },
   registration_date: Date,
   driving_license: String,
