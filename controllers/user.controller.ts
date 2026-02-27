@@ -420,17 +420,7 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       background-color: #ffffff;
       border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    }
-
-    .header {
-      padding: 30px 40px;
-      text-align: center;
-      background-color: #000000;
-    }
-
-    .logo {
-      max-height: 40px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
     .content {
@@ -445,7 +435,7 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       padding: 20px;
       text-align: center;
       margin: 30px 0;
-      border: 1px dashed #cccccc;
+      border: 1px dashed #ccc;
     }
 
     .otp-code {
@@ -469,17 +459,9 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 
 <body>
   <div class="container">
-    <div class="header">
-      <img
-        src="${logoUrl}"
-        alt="Stark Logo"
-        class="logo"
-        style="display: block; margin: auto;"
-      />
-    </div>
 
     <div class="content">
-      <h2 style="margin-top: 0; font-weight: 600; color: #111;">
+      <h2 style="margin-top:0; font-weight:600; color:#111;">
         Verify your email address
       </h2>
 
@@ -495,12 +477,12 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
         <p class="otp-code">${otp}</p>
       </div>
 
-      <p style="font-size: 14px; color: #666;">
+      <p style="font-size:14px; color:#666;">
         This OTP is valid for <strong>5 minutes</strong>. If you did not request
         this verification, please disregard this email.
       </p>
 
-      <p style="margin-top: 30px;">
+      <p style="margin-top:30px;">
         Best regards,<br />
         <strong>The Stark Team</strong>
       </p>

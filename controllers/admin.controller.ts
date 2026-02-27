@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride, Transaction, User } from "../db/schema";
 import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
 import { sendPushNotification } from "../utils/sendNotification";
+import { nylas } from "../app";
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
@@ -368,6 +369,120 @@ export const approveDriver = async (req: any, res: Response) => {
       { upsert: true, new: true }
     );
 
+    // --- DRIVER APPROVAL EMAIL TEMPLATE ---
+    const approvalEmailTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Driver Application Approved</title>
+
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f4f4f7;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .content {
+      padding: 40px;
+      color: #333333;
+      line-height: 1.6;
+    }
+
+    .status-box {
+      background-color: #e6f9f0;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin: 30px 0;
+      border: 1px solid #28a745;
+    }
+
+    .approved-text {
+      font-size: 20px;
+      font-weight: 700;
+      color: #28a745;
+      margin: 0;
+    }
+
+    .footer {
+      background-color: #f9f9f9;
+      padding: 20px 40px;
+      text-align: center;
+      font-size: 12px;
+      color: #888888;
+      border-top: 1px solid #eeeeee;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="content">
+      <h2 style="margin-top:0; font-weight:600; color:#111;">
+        Congratulations 🎉
+      </h2>
+
+      <p>Hi ${foundDriver.name},</p>
+
+      <p>
+        We are pleased to inform you that your driver application has been 
+        <strong>successfully approved</strong>.
+      </p>
+
+      <div class="status-box">
+        <p class="approved-text">Your Account is Now Active</p>
+      </div>
+
+      <p>
+        You can now log in to the Stark Driver App and start accepting rides.
+      </p>
+
+      ${remark
+        ? `<p><strong>Admin Remark:</strong> ${remark}</p>`
+        : ""
+      }
+
+      <p style="margin-top:30px;">
+        Welcome to the Stark family 🚖<br />
+        <strong>The Stark Team</strong>
+      </p>
+    </div>
+
+    <div class="footer">
+      <p>
+        &copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.
+      </p>
+      <p>This is an automated message, please do not reply.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+    await nylas.messages.send({
+      identifier: process.env.USER_GRANT_ID!,
+      requestBody: {
+        to: [{ name: foundDriver.name, email: foundDriver.email }],
+        subject: "Your Driver Application is Approved - Stark",
+        body: approvalEmailTemplate,
+      },
+    });
+
     res.status(200).json({
       success: true,
       message: "Driver approved successfully",
@@ -393,13 +508,13 @@ export const deapproveDriver = async (req: any, res: Response) => {
     }
 
     // Already de-approved
-    if (!Driver.is_approved ) {
+    if (!Driver.is_approved) {
       return res.status(400).json({
         success: false,
         message: "Driver already not approved",
       });
     }
-    if (Driver.pending_suspension ) {
+    if (Driver.pending_suspension) {
       return res.status(400).json({
         success: false,
         message: "Driver marked for suspension",

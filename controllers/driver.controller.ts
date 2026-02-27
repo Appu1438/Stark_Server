@@ -728,16 +728,6 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
-    .header {
-      padding: 30px 40px;
-      text-align: center;
-      background-color: #000000;
-    }
-
-    .logo {
-      max-height: 40px;
-    }
-
     .content {
       padding: 40px;
       color: #333333;
@@ -774,14 +764,6 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 
 <body>
   <div class="container">
-    <div class="header">
-      <img
-        src="${logoUrl}"
-        alt="Stark Logo"
-        class="logo"
-        style="display:block; margin:auto;"
-      />
-    </div>
 
     <div class="content">
       <h2 style="margin-top:0; font-weight:600; color:#111;">
@@ -791,7 +773,7 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       <p>Hi ${name},</p>
 
       <p>
-        Thank you for joining <strong>Stark</strong>. To complete your
+        Thank you for joining <strong>Stark Driver</strong>. To complete your
         registration, please verify your email address by entering the code
         below:
       </p>
