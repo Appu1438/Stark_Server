@@ -5,28 +5,59 @@ export const calculateFare = async (req: Request, res: Response) => {
   try {
     const { vehicle_type, distance, district } = req.body;
 
+    console.log("------ FARE CALCULATION START ------");
+    console.log("Incoming request:", {
+      vehicle_type,
+      distance,
+      district,
+    });
+
     if (!vehicle_type || distance == null) {
-      return res.status(400).json({ message: "Vehicle type and distance are required" });
+      console.log("Missing vehicle_type or distance");
+      return res.status(400).json({
+        message: "Vehicle type and distance are required",
+      });
     }
 
+    // -----------------------------------------
     // Fetch fare config
+    // -----------------------------------------
     let fare = await Fare.findOne({ vehicle_type, district });
+
     if (!fare) {
+      console.log("District fare not found. Falling back to Default.");
       fare = await Fare.findOne({ vehicle_type, district: "Default" });
+
       if (!fare) {
+        console.log("Default fare config also not found!");
         return res.status(404).json({ message: "Fare details not found" });
       }
     }
 
+    console.log("Fare config loaded:", fare);
+
     // -----------------------------------------
-    // 🌙 NIGHT TIME CHECK
+    // 🌙 NIGHT TIME CHECK (India Time)
     // -----------------------------------------
-    const currentHour = new Date().getHours();
+    const serverTime = new Date();
+    const indiaTimeString = serverTime.toLocaleString("en-US", {
+      timeZone: "Asia/Kolkata",
+    });
+    const indiaTime = new Date(indiaTimeString);
+    const currentHour = indiaTime.getHours();
+
+    console.log("Server time:", serverTime);
+    console.log("India time:", indiaTime);
+    console.log("Current hour (India):", currentHour);
+    console.log("Night start:", fare.nightStart);
+    console.log("Night end:", fare.nightEnd);
 
     const isNight =
       fare.nightStart > fare.nightEnd
         ? currentHour >= fare.nightStart || currentHour < fare.nightEnd
         : currentHour >= fare.nightStart && currentHour < fare.nightEnd;
+
+    console.log("Is night charge applied?", isNight);
 
     // -----------------------------------------
     // 1️⃣ Base Fare Calculation
@@ -35,47 +66,60 @@ export const calculateFare = async (req: Request, res: Response) => {
 
     if (distance <= fare.baseFareUptoKm) {
       rawFare = fare.baseFare;
+      console.log("Distance within base fare range");
     } else {
       const extraKm = distance - fare.baseFareUptoKm;
       rawFare = fare.baseFare + extraKm * fare.perKmRate;
+      console.log("Extra km:", extraKm);
     }
+
+    console.log("Raw fare before surge:", rawFare);
 
     // -----------------------------------------
     // 2️⃣ Apply normal surge
     // -----------------------------------------
     rawFare = rawFare * fare.surgeMultiplier;
+    console.log("After surge multiplier:", rawFare);
 
     // -----------------------------------------
     // 3️⃣ Apply night surge 🌙
     // -----------------------------------------
     if (isNight) {
       rawFare = rawFare * fare.nightMultiplier;
+      console.log("Night multiplier applied:", fare.nightMultiplier);
     }
 
     const baseFare = Math.round(rawFare);
+    console.log("Base fare after rounding:", baseFare);
 
     // -----------------------------------------
-    // 4️⃣ TAX (5%) added to USER payment
+    // 4️⃣ TAX (5%)
     // -----------------------------------------
     const taxAmount = Math.round(baseFare * 0.05);
+    console.log("Tax amount:", taxAmount);
 
     // -----------------------------------------
     // 5️⃣ Platform Fee (10%)
     // -----------------------------------------
-    const platformFee = Math.round(baseFare * 0.10);
+    const platformFee = Math.round(baseFare * 0.1);
+    console.log("Platform fee:", platformFee);
 
     const userPayable = baseFare + taxAmount;
-
+    console.log("User payable:", userPayable);
 
     // -----------------------------------------
     // 6️⃣ Total deductions
     // -----------------------------------------
     const totalDeductions = platformFee + taxAmount;
+    console.log("Total deductions:", totalDeductions);
 
     // -----------------------------------------
     // 7️⃣ Driver Earnings
     // -----------------------------------------
     const driverEarnings = userPayable - totalDeductions;
+    console.log("Driver earnings:", driverEarnings);
+
+    console.log("------ FARE CALCULATION END ------");
 
     return res.status(200).json({
       success: true,
@@ -83,18 +127,18 @@ export const calculateFare = async (req: Request, res: Response) => {
         totalFare: userPayable,
         platformShare: totalDeductions,
         driverEarnings,
-
-        // 🔥 extra info (very useful for UI)
         isNightChargeApplied: isNight,
         nightMultiplier: isNight ? fare.nightMultiplier : 1,
-
         fareDetails: fare,
       },
     });
 
   } catch (error) {
     console.error("Error calculating fare:", error);
-    res.status(500).json({ message: "Error calculating fare", error });
+    res.status(500).json({
+      message: "Error calculating fare",
+      error,
+    });
   }
 };
 
