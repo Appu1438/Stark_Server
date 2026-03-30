@@ -87,6 +87,7 @@ const driverSchema = new Schema({
   gender: { type: String, enum: ["Male", "Female", "Other"] },
 
   notificationToken: { type: String, default: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
+
   activeDevice: {
     fingerprint: { type: String, default: null },
     brand: { type: String, default: null },
@@ -116,9 +117,8 @@ const driverSchema = new Schema({
   is_approved: { type: Boolean, default: false },
   pending_suspension: { type: Boolean, default: false },
 
-
-  ratings: { type: Number, default: 0 }, // average rating
-  totalRatings: { type: Number, default: 0 }, // number of ratings received
+  ratings: { type: Number, default: 0 },
+  totalRatings: { type: Number, default: 0 },
 
   totalEarning: { type: Number, default: 0 },
   totalShare: { type: Number, default: 0 },
@@ -126,8 +126,29 @@ const driverSchema = new Schema({
   pendingRides: { type: Number, default: 0 },
   cancelRides: { type: Number, default: 0 },
 
-}, { timestamps: true });
+  // 🔥 NEW REFERRAL SYSTEM
 
+  usedReferralCode: {
+    type: String,
+    default: null
+  },
+
+  ownReferralCode: {
+    type: String,
+    unique: true
+  },
+
+  referralCount: {
+    type: Number,
+    default: 0
+  },
+
+  commission: {
+    type: Number,
+    default: 0
+  }
+
+}, { timestamps: true });
 
 const rideSchema = new Schema(
   {
@@ -276,6 +297,10 @@ const fareSchema = new Schema({
   surgeMultiplier: { type: Number, default: 1 },
 
   district: { type: String, default: "Default" },
+
+  nightMultiplier: { type: Number, default: 1.2 }, // e.g. 1.2
+  nightStart: { type: Number, default: 22 }, // 22 = 10 PM
+  nightEnd: { type: Number, default: 6 }, // 6 = 6 AM
 }, { timestamps: true });
 
 

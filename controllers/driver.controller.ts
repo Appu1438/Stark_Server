@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import { hashOtp } from "../utils/hashOtp";
 import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
 import { getRegistrationBonus } from "../utils/getBonus";
+import { generateReferralCode } from "../utils/generateReferralCode";
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
@@ -638,7 +639,8 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             insurance_expiry,
             vehicle_color,
             capacity,
-            profilePic
+            profilePic,
+            usedReferralCode
         } = req.body;
 
         console.log("👤 [EMAIL OTP] Preparing OTP for:", email);
@@ -672,7 +674,8 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
             insurance_expiry,
             vehicle_color,
             capacity,
-            profilePic
+            profilePic,
+            usedReferralCode
         };
 
         console.log("📄 [EMAIL OTP] Driver payload prepared");
@@ -885,7 +888,8 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             insurance_expiry,
             vehicle_color,
             capacity,
-            profilePic
+            profilePic,
+            usedReferralCode
         } = newDriver.driver;
 
         console.log("🔍 [EMAIL VERIFY] Checking for duplicate driver");
@@ -933,6 +937,8 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             return isNaN(parsed.getTime()) ? null : parsed;
         };
 
+        const ownReferralCode = generateReferralCode(name, phone_number);
+
         const Driver = new driver({
             name,
             email,
@@ -954,7 +960,9 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
             insurance_expiry: parseDate(insurance_expiry),
             vehicle_color,
             capacity,
-            profilePic
+            profilePic,
+            ownReferralCode,
+            usedReferralCode
         });
 
         await Driver.save();
@@ -977,6 +985,75 @@ export const verifyingEmailOtp = async (req: Request, res: Response) => {
                 },
             ],
         });
+
+        // ==========================
+        // 🔥 REFERRAL SYSTEM LOGIC
+        // ==========================
+        if (usedReferralCode) {
+            try {
+                const referrer = await driver.findOne({
+                    ownReferralCode: usedReferralCode
+                });
+
+                // ❌ Prevent invalid or self referral
+                if (referrer && referrer._id.toString() !== Driver._id.toString()) {
+
+                    // ✅ Update referrer stats
+                    referrer.referralCount = (referrer.referralCount || 0) + 1;
+                    referrer.commission = (referrer.commission || 0) + 100;
+
+                    await referrer.save();
+
+                    // ✅ Update referrer wallet
+                    const referrerWallet = await DriverWallet.findOne({
+                        driverId: referrer._id
+                    });
+
+                    if (referrerWallet) {
+                        referrerWallet.balance += 100;
+
+                        referrerWallet.history.push({
+                            type: "credit",
+                            action: "bonus",
+                            amount: 100,
+                            referenceId: Driver._id,
+                            meta: {
+                                referredDriver: Driver.name,
+                                reason: "Referral Bonus"
+                            },
+                            balanceAfter: referrerWallet.balance,
+                            actionOn: new Date(),
+                        });
+
+                        await referrerWallet.save();
+                    } else {
+                        // 🔥 if wallet not exists (rare case)
+                        await DriverWallet.create({
+                            driverId: referrer._id,
+                            balance: 100,
+                            history: [
+                                {
+                                    type: "credit",
+                                    action: "bonus",
+                                    amount: 100,
+                                    referenceId: Driver._id,
+                                    meta: {
+                                        referredDriver: Driver.name,
+                                        reason: "Referral Bonus"
+                                    },
+                                    balanceAfter: 100,
+                                    actionOn: new Date(),
+                                },
+                            ],
+                        });
+                    }
+
+                    console.log(`🎉 Referral bonus given to ${referrer.name}`);
+                }
+            } catch (err) {
+                console.error("❌ Referral logic error:", err);
+            }
+        }
 
 
         res.status(201).json({
@@ -1332,7 +1409,43 @@ export const getDriverEarnings = async (req, res) => {
     }
 };
 
+export const getReferredDrivers = async (req: Request, res: Response) => {
+    try {
+        const { code } = req.params;
+        console.log(code)
 
+        if (!code) {
+            return res.status(400).json({
+                success: false,
+                message: "Referral code is required",
+            });
+        }
+
+        // 🔍 Find drivers who used this referral code
+        const drivers = await driver.find(
+            { usedReferralCode: code },
+            {
+                name: 1,
+                phone_number: 1,
+                createdAt: 1,
+            }
+        ).sort({ createdAt: -1 }); // latest first
+
+        return res.status(200).json({
+            success: true,
+            count: drivers.length,
+            data: drivers,
+        });
+
+    } catch (error) {
+        console.error("❌ Get referred drivers error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch referred drivers",
+        });
+    }
+};
 
 // Helper: ISO week number
 function getWeekNumber(d: Date) {

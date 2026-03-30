@@ -6,6 +6,7 @@ import {
   getDriversById,
   getDriverWallet,
   getLoggedInDriverData,
+  getReferredDrivers,
   logoutDriver,
   refreshTokenDriver,
   sendingOtpToPhone,
@@ -50,6 +51,8 @@ driverRouter.get("/ride/:id", isAuthenticatedDriver, checkDriverDevice, checkDri
 driverRouter.get("/get-rides", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getAllRides);
 
 driverRouter.get("/earnings", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getDriverEarnings);
+
+driverRouter.get("/referrals/:code", isAuthenticatedDriver, checkDriverDevice, checkDriverApproval, getReferredDrivers);
 
 
 export default driverRouter;

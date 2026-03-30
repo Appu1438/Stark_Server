@@ -19,6 +19,16 @@ export const calculateFare = async (req: Request, res: Response) => {
     }
 
     // -----------------------------------------
+    // 🌙 NIGHT TIME CHECK
+    // -----------------------------------------
+    const currentHour = new Date().getHours();
+
+    const isNight =
+      fare.nightStart > fare.nightEnd
+        ? currentHour >= fare.nightStart || currentHour < fare.nightEnd
+        : currentHour >= fare.nightStart && currentHour < fare.nightEnd;
+
+    // -----------------------------------------
     // 1️⃣ Base Fare Calculation
     // -----------------------------------------
     let rawFare = 0;
@@ -30,36 +40,54 @@ export const calculateFare = async (req: Request, res: Response) => {
       rawFare = fare.baseFare + extraKm * fare.perKmRate;
     }
 
-    // Apply surge
-    const baseFare = Math.round(rawFare * fare.surgeMultiplier);
+    // -----------------------------------------
+    // 2️⃣ Apply normal surge
+    // -----------------------------------------
+    rawFare = rawFare * fare.surgeMultiplier;
 
     // -----------------------------------------
-    // 2️⃣ TAX (5%) added to USER payment only
+    // 3️⃣ Apply night surge 🌙
+    // -----------------------------------------
+    if (isNight) {
+      rawFare = rawFare * fare.nightMultiplier;
+    }
+
+    const baseFare = Math.round(rawFare);
+
+    // -----------------------------------------
+    // 4️⃣ TAX (5%) added to USER payment
     // -----------------------------------------
     const taxAmount = Math.round(baseFare * 0.05);
-    const userPayable = baseFare + taxAmount;
 
     // -----------------------------------------
-    // 3️⃣ Platform Fee (10% of base fare)
+    // 5️⃣ Platform Fee (10%)
     // -----------------------------------------
     const platformFee = Math.round(baseFare * 0.10);
 
+    const userPayable = baseFare + taxAmount;
+
+
     // -----------------------------------------
-    // 5️⃣ Total deductions (platform fee + tax)
+    // 6️⃣ Total deductions
     // -----------------------------------------
     const totalDeductions = platformFee + taxAmount;
 
     // -----------------------------------------
-    // 6️⃣ Driver Final Earnings
+    // 7️⃣ Driver Earnings
     // -----------------------------------------
     const driverEarnings = userPayable - totalDeductions;
 
     return res.status(200).json({
       success: true,
       data: {
-        totalFare: userPayable,      // User pays this
-        platformShare: totalDeductions, // 10% + tax cut from wallet
-        driverEarnings,              // Driver receives this
+        totalFare: userPayable,
+        platformShare: totalDeductions,
+        driverEarnings,
+
+        // 🔥 extra info (very useful for UI)
+        isNightChargeApplied: isNight,
+        nightMultiplier: isNight ? fare.nightMultiplier : 1,
+
         fareDetails: fare,
       },
     });
