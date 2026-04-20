@@ -463,6 +463,58 @@ const otpSchema = new mongoose.Schema({
 
 
 
+const packageTripSchema = new mongoose.Schema(
+  {
+    pickupLocation: {
+      type: String,
+      required: true,
+    },
+
+    dropLocation: {
+      type: String,
+      required: true,
+    },
+
+    startDate: {
+      type: Date,
+      required: true,
+    },
+
+    endDate: {
+      type: Date,
+      required: true,
+    },
+
+    cabType: {
+      type: String,
+      required: true,
+    },
+
+    priority: {
+      type: String,
+      enum: ["low", "medium", "high"],
+      default: "low",
+    },
+
+    description: {
+      type: String,
+    },
+
+    contactNumber: {
+      type: String,
+    },
+
+    status: {
+      type: String,
+      default: "active",
+    },
+  },
+  { timestamps: true }
+);
+
+
+export const PackageTrip = mongoose.model("PackageTrip", packageTripSchema)
+
 export const Otp = mongoose.model("Otp", otpSchema);
 
 export const RideRequest = mongoose.model("ride_request", rideRequestSchema);

@@ -12,6 +12,7 @@ import fareRouter from "./routes/fare.route";
 import rideRouter from "./routes/ride.route";
 import complaintRouter from "./routes/complaint.route";
 import twilio from "twilio";
+import packageRouter from "./routes/package.route";
 
 export const app = express();
 
@@ -56,6 +57,7 @@ app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/fare", fareRouter);
 app.use("/api/v1/ride", rideRouter);
 app.use("/api/v1/complaints", complaintRouter);
+app.use("/api/v1/packages", packageRouter);
 
 // testing api
 app.get("/", (req: Request, res: Response, next: NextFunction) => {
