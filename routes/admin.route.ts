@@ -1,5 +1,5 @@
 import express from "express";
-import { activateAdmin, approveDriver, createAdmin, deactivateAdmin, deapproveDriver, getAdminHistory, getAllAdmins, getAllTransactions, getAllUsers, getDriverApprovalHistory, getDrivers, getDriverStats, getDriverWallet, getRides, getTransactionsInfo, getUserStats, loginAdmin, logoutAdmin, refreshTokenAdmin, updateAdmin, updateDriver } from "../controllers/admin.controller";
+import { activateAdmin, approveDriver, createAdmin, deactivateAdmin, deapproveDriver, getAdminHistory, getAllAdmins, getAllTransactions, getAllUsers, getDriverApprovalHistory, getDrivers, getDriverStats, getDriverWallet, getRides, getRideStats, getTransactionStats, getTransactionsInfo, getUserStats, loginAdmin, logoutAdmin, refreshTokenAdmin, updateAdmin, updateDriver } from "../controllers/admin.controller";
 import { isAuthenticatedAdmin } from "../middleware/isAuthenticated";
 import { checkAdminRole } from "../middleware/checkAdminRole";
 import { isActiveAdmin } from "../middleware/checkAdminStatus";
@@ -50,11 +50,12 @@ adminRouter.patch('/admins/deactivate/:id', isAuthenticatedAdmin, isActiveAdmin,
 
 // Transactions
 adminRouter.get('/transactions', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', "Admin", "Moderator"]), getAllTransactions)
-
+adminRouter.get("/transactions/stats", isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', 'Admin', 'Moderator']), getTransactionStats);
 adminRouter.get('/transactions-info', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', "Admin", "Moderator"]), getTransactionsInfo)
 
 // Rides
 adminRouter.get('/rides', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', "Admin", "Moderator"]), getRides)
+adminRouter.get("/rides/stats", isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', 'Admin', 'Moderator']), getRideStats);
 
 
 export default adminRouter;

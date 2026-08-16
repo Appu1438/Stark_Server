@@ -978,6 +978,25 @@ export const getAllTransactions = async (req: Request, res: Response) => {
   }
 };
 
+export const getTransactionStats = async (req: Request, res: Response) => {
+  try {
+    const stats = await Transaction.aggregate([
+      {
+        $group: {
+          _id: { $month: "$createdAt" },
+          total: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.status(200).json(stats);
+  } catch (err) {
+    console.error("Transaction stats error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const getTransactionsInfo = async (req: Request, res: Response) => {
   try {
     // 1️⃣ All-time totals
@@ -1078,6 +1097,25 @@ export const getRides = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("Get All Rides Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getRideStats = async (req: Request, res: Response) => {
+  try {
+    const stats = await Ride.aggregate([
+      {
+        $group: {
+          _id: { $month: "$createdAt" },
+          total: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.status(200).json(stats);
+  } catch (err) {
+    console.error("Ride stats error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 };
