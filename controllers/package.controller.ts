@@ -1,4 +1,5 @@
-import { PackageTrip } from "../db/schema";
+import { driver, PackageTrip } from "../db/schema";
+const axios = require("axios");
 
 
 export const getAllPackageTrips = async (req: any, res: any) => {
@@ -18,6 +19,7 @@ export const getAllPackageTrips = async (req: any, res: any) => {
         });
     }
 };
+
 export const createPackageTrip = async (req: any, res: any) => {
     try {
         const {
@@ -58,6 +60,59 @@ export const createPackageTrip = async (req: any, res: any) => {
         });
 
         const savedTrip = await newTrip.save();
+
+        // Send notification to all drivers
+        try {
+            const drivers = await driver.find(
+                {
+                    notificationToken: {
+                        $exists: true,
+                        $nin: [null, ""],
+                    },
+                },
+                {
+                    notificationToken: 1,
+                }
+            );
+
+            const driverTokens = [
+                ...new Set(
+                    drivers
+                        .map((driver) => driver.notificationToken)
+                        .filter(Boolean)
+                ),
+            ];
+
+            if (driverTokens.length > 0) {
+                const messages = driverTokens.map((token) => ({
+                    to: token,
+                    sound: "default",
+                    title: "🚕 New Urgent Requirement",
+                    body: `New urgent requirement : from ${pickupLocation} → ${dropLocation} . Check the details and submit your interest!`,
+
+                }));
+
+                await axios.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    messages,
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                    }
+                );
+
+                console.log(
+                    `Package trip notification sent to ${driverTokens.length} drivers`
+                );
+            }
+        } catch (notificationError: any) {
+            // Don't fail package creation if notification fails
+            console.error(
+                "Failed to send package trip notification:",
+                notificationError.response?.data || notificationError.message
+            );
+        }
 
         return res.status(201).json({
             success: true,

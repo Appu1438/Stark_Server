@@ -4,8 +4,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride, Transaction, User } from "../db/schema";
 import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
-import { sendPushNotification } from "../utils/sendNotification";
 import { nylas } from "../app";
+const axios = require("axios");
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
@@ -1117,5 +1117,136 @@ export const getRideStats = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Ride stats error:", err);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+//Notifications
+
+export const sendAdminPushNotification = async (req: any, res: any) => {
+  try {
+    const { title, body, target } = req.body;
+
+    // Validate request
+    if (!title?.trim() || !body?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Title and message are required.",
+      });
+    }
+
+    if (!["users", "drivers", "all"].includes(target)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification target.",
+      });
+    }
+
+    let tokens = [];
+
+    // Users
+    if (target === "users" || target === "all") {
+      const users = await User.find(
+        {
+          notificationToken: {
+            $exists: true,
+            $nin: [null, ""],
+          },
+        },
+        {
+          notificationToken: 1,
+        }
+      );
+
+      tokens.push(
+        ...users.map((user) => user.notificationToken)
+      );
+    }
+
+    // Drivers
+    if (target === "drivers" || target === "all") {
+      const drivers = await driver.find(
+        {
+          notificationToken: {
+            $exists: true,
+            $nin: [null, ""],
+          },
+        },
+        {
+          notificationToken: 1,
+        }
+      );
+
+      tokens.push(
+        ...drivers.map((driver) => driver.notificationToken)
+      );
+    }
+
+    // Remove duplicate tokens
+    tokens = [...new Set(tokens)];
+
+    if (tokens.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No notification tokens found.",
+      });
+    }
+
+    // Expo supports sending multiple notifications
+    // but we send in batches for safety.
+    const messages = tokens.map((token) => ({
+      to: token,
+      sound: "default",
+      title: title.trim(),
+      body: body.trim(),
+      data: {
+        type: "ADMIN_NOTIFICATION",
+      },
+    }));
+
+    const chunks = [];
+    const chunkSize = 100;
+
+    for (let i = 0; i < messages.length; i += chunkSize) {
+      chunks.push(messages.slice(i, i + chunkSize));
+    }
+
+    const results = [];
+
+    for (const chunk of chunks) {
+      const response = await axios.post(
+        "https://exp.host/--/api/v2/push/send",
+        chunk,
+        {
+          headers: {
+            Accept: "application/json",
+            "Accept-encoding": "gzip, deflate",
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      results.push(response.data);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification sent successfully.",
+      target,
+      totalTokens: tokens.length,
+      results,
+    });
+
+  } catch (error: any) {
+    console.error(
+      "Admin notification error:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send notification.",
+      error: error.response?.data || error.message,
+    });
   }
 };

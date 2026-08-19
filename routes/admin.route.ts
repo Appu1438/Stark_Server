@@ -1,5 +1,5 @@
 import express from "express";
-import { activateAdmin, approveDriver, createAdmin, deactivateAdmin, deapproveDriver, getAdminHistory, getAllAdmins, getAllTransactions, getAllUsers, getDriverApprovalHistory, getDrivers, getDriverStats, getDriverWallet, getRides, getRideStats, getTransactionStats, getTransactionsInfo, getUserStats, loginAdmin, logoutAdmin, refreshTokenAdmin, updateAdmin, updateDriver } from "../controllers/admin.controller";
+import { activateAdmin, approveDriver, createAdmin, deactivateAdmin, deapproveDriver, getAdminHistory, getAllAdmins, getAllTransactions, getAllUsers, getDriverApprovalHistory, getDrivers, getDriverStats, getDriverWallet, getRides, getRideStats, getTransactionStats, getTransactionsInfo, getUserStats, loginAdmin, logoutAdmin, refreshTokenAdmin, updateAdmin, updateDriver, sendAdminPushNotification } from "../controllers/admin.controller";
 import { isAuthenticatedAdmin } from "../middleware/isAuthenticated";
 import { checkAdminRole } from "../middleware/checkAdminRole";
 import { isActiveAdmin } from "../middleware/checkAdminStatus";
@@ -57,5 +57,7 @@ adminRouter.get('/transactions-info', isAuthenticatedAdmin, isActiveAdmin, check
 adminRouter.get('/rides', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', "Admin", "Moderator"]), getRides)
 adminRouter.get("/rides/stats", isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', 'Admin', 'Moderator']), getRideStats);
 
+//Notifications
+adminRouter.post('/notifications/send', isAuthenticatedAdmin, isActiveAdmin, checkAdminRole(['SuperAdmin', 'Admin']), sendAdminPushNotification)
 
 export default adminRouter;
