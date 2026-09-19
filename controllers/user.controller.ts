@@ -400,113 +400,115 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Verify your email</title>
-
-  <style>
-    body {
-      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      background-color: #f4f4f7;
-      margin: 0;
-      padding: 0;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 600px;
-      margin: 40px auto;
-      background-color: #ffffff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    }
-
-    .content {
-      padding: 40px;
-      color: #333333;
-      line-height: 1.6;
-    }
-
-    .otp-block {
-      background-color: #f0f2f5;
-      border-radius: 8px;
-      padding: 20px;
-      text-align: center;
-      margin: 30px 0;
-      border: 1px dashed #ccc;
-    }
-
-    .otp-code {
-      font-size: 32px;
-      font-weight: 700;
-      letter-spacing: 8px;
-      color: #000000;
-      margin: 0;
-    }
-
-    .footer {
-      background-color: #f9f9f9;
-      padding: 20px 40px;
-      text-align: center;
-      font-size: 12px;
-      color: #888888;
-      border-top: 1px solid #eeeeee;
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stark verification code</title>
 </head>
 
-<body>
-  <div class="container">
+<body style="
+  margin:0;
+  padding:0;
+  background-color:#f5f5f5;
+  font-family:Arial, Helvetica, sans-serif;
+  color:#333333;
+">
 
-    <div class="content">
-      <h2 style="margin-top:0; font-weight:600; color:#111;">
-        Verify your email address
+  <div style="
+    width:100%;
+    max-width:600px;
+    margin:30px auto;
+    background:#ffffff;
+  ">
+
+    <div style="
+      padding:35px;
+    ">
+
+      <h2 style="
+        margin:0 0 20px;
+        font-size:22px;
+        font-weight:600;
+        color:#111111;
+      ">
+        Your Stark verification code
       </h2>
 
       <p>Hi ${name},</p>
 
       <p>
-        Thank you for joining <strong>Stark</strong>. To complete your
-        registration, please verify your email address by entering the code
-        below:
+        Use the verification code below to complete your Stark registration.
       </p>
 
-      <div class="otp-block">
-        <p class="otp-code">${otp}</p>
+      <div style="
+        margin:25px 0;
+        padding:20px;
+        text-align:center;
+        background:#f5f5f5;
+        border:1px solid #eeeeee;
+      ">
+        <p style="
+          margin:0;
+          font-size:30px;
+          font-weight:bold;
+          letter-spacing:6px;
+          color:#111111;
+        ">
+          ${otp}
+        </p>
       </div>
 
-      <p style="font-size:14px; color:#666;">
-        This OTP is valid for <strong>5 minutes</strong>. If you did not request
-        this verification, please disregard this email.
+      <p style="
+        font-size:14px;
+        color:#666666;
+      ">
+        This code is valid for 5 minutes.
+      </p>
+
+      <p style="
+        font-size:14px;
+        color:#666666;
+      ">
+        If you did not request this code, you can safely ignore this email.
       </p>
 
       <p style="margin-top:30px;">
-        Best regards,<br />
-        <strong>The Stark Team</strong>
+        Regards,<br>
+        <strong>Stark Team</strong>
       </p>
+
+      <hr style="
+        margin:30px 0;
+        border:0;
+        border-top:1px solid #eeeeee;
+      ">
+
+      <p style="
+        margin:0;
+        text-align:center;
+        font-size:12px;
+        color:#888888;
+      ">
+        This is an automated message from Stark OPC Pvt Ltd.
+      </p>
+
     </div>
 
-    <div class="footer">
-      <p>
-        &copy; ${new Date().getFullYear()} Stark OPC Pvt Ltd. All rights reserved.
-      </p>
-      <p>This is an automated message, please do not reply.</p>
-    </div>
   </div>
+
 </body>
 </html>
 `;
 
-    console.log(`📨 [EMAIL OTP SEND][${requestId}] Sending email via Nylas`);
+    console.log(
+      `📨 [EMAIL OTP SEND][${requestId}] Sending email via Nylas`
+    );
 
     await nylas.messages.send({
       identifier: process.env.USER_GRANT_ID!,
       requestBody: {
         to: [{ name, email }],
-        subject: "Verify your email address - Stark",
-        body: emailTemplate, // unchanged
+        subject: "Your Stark verification code",
+        body: emailTemplate,
       },
     });
 
