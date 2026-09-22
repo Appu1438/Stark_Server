@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride, Transaction, User } from "../db/schema";
 import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
 import { nylas } from "../app";
+import { transporter } from "../utils/mailer";
 const axios = require("axios");
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
@@ -340,19 +341,35 @@ export const getDrivers = async (req: Request, res: Response) => {
 export const approveDriver = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-    const { remark } = req.body; // ✅ get remark from frontend
+    const { remark } = req.body;
     const adminId = req.admin.id;
 
     const foundDriver = await driver.findById(id);
+
     if (!foundDriver) {
-      return res.status(404).json({ success: false, message: "Driver not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found",
+      });
     }
+
     if (foundDriver.is_approved) {
-      return res.status(400).json({ success: false, message: "Driver already approved" });
+      return res.status(400).json({
+        success: false,
+        message: "Driver already approved",
+      });
     }
+
+    // ------------------------------------
+    // APPROVE DRIVER
+    // ------------------------------------
 
     foundDriver.is_approved = true;
     await foundDriver.save();
+
+    // ------------------------------------
+    // SAVE AUDIT LOG
+    // ------------------------------------
 
     await driverAuditLog.findOneAndUpdate(
       { driverId: id },
@@ -362,14 +379,20 @@ export const approveDriver = async (req: any, res: Response) => {
             action: "Approved",
             actionBy: adminId,
             actionOn: new Date(),
-            remark: remark || "Approved without remark" // ✅ store remark
+            remark: remark || "Approved without remark",
           },
         },
       },
-      { upsert: true, new: true }
+      {
+        upsert: true,
+        new: true,
+      }
     );
 
-    // --- DRIVER APPROVAL EMAIL TEMPLATE ---
+    // ------------------------------------
+    // DRIVER APPROVAL EMAIL
+    // ------------------------------------
+
     const approvalEmailTemplate = `
 <!DOCTYPE html>
 <html>
@@ -388,81 +411,96 @@ export const approveDriver = async (req: any, res: Response) => {
 ">
 
   <div style="
+    width:100%;
     max-width:600px;
     margin:30px auto;
     background:#ffffff;
-    padding:35px;
   ">
 
-    <h2 style="
-      margin:0 0 20px;
-      font-size:22px;
-      color:#111111;
-    ">
-      Your Stark Driver account is approved
-    </h2>
+    <div style="padding:35px;">
 
-    <p>Hi ${foundDriver.name},</p>
-
-    <p>
-      Your driver application has been successfully approved.
-    </p>
-
-    <div style="
-      margin:25px 0;
-      padding:18px;
-      text-align:center;
-      background:#f5f5f5;
-      border:1px solid #eeeeee;
-    ">
-      <p style="
-        margin:0;
-        font-size:18px;
-        font-weight:bold;
+      <h2 style="
+        margin:0 0 20px;
+        font-size:22px;
+        font-weight:600;
         color:#111111;
       ">
-        Account Active
+        Your Stark Driver account is approved
+      </h2>
+
+      <p>
+        Hi ${foundDriver.name},
       </p>
-    </div>
 
-    <p>
-      You can now log in to the Stark Driver App and start accepting rides.
-    </p>
+      <p>
+        Your driver application has been successfully approved.
+      </p>
 
-    ${remark
-        ? `
+      <div style="
+        margin:25px 0;
+        padding:18px;
+        text-align:center;
+        background:#f5f5f5;
+        border:1px solid #eeeeee;
+      ">
         <p style="
-          margin-top:25px;
-          padding:15px;
-          background:#fafafa;
-          border-left:3px solid #dddddd;
+          margin:0;
+          font-size:18px;
+          font-weight:bold;
+          color:#111111;
         ">
-          <strong>Admin remark:</strong><br>
-          ${remark}
+          Account Active
         </p>
-        `
+      </div>
+
+      <p>
+        You can now log in to the Stark Driver App
+        and start accepting rides.
+      </p>
+
+      ${remark
+        ? `
+          <div style="
+            margin-top:25px;
+            padding:15px;
+            background:#fafafa;
+            border-left:3px solid #dddddd;
+          ">
+            <p style="
+              margin:0;
+              font-size:14px;
+              color:#555555;
+              line-height:1.6;
+            ">
+              <strong>Admin remark:</strong><br>
+              ${remark}
+            </p>
+          </div>
+          `
         : ""
       }
 
-    <p style="margin-top:30px;">
-      Regards,<br>
-      <strong>Stark Team</strong>
-    </p>
+      <p style="margin-top:30px;">
+        Regards,<br>
+        <strong>Stark Team</strong>
+      </p>
 
-    <hr style="
-      margin:30px 0;
-      border:0;
-      border-top:1px solid #eeeeee;
-    ">
+      <hr style="
+        margin:30px 0;
+        border:0;
+        border-top:1px solid #eeeeee;
+      ">
 
-    <p style="
-      margin:0;
-      font-size:12px;
-      color:#888888;
-      text-align:center;
-    ">
-      This is an automated message from Stark OPC Pvt Ltd.
-    </p>
+      <p style="
+        margin:0;
+        font-size:12px;
+        color:#888888;
+        text-align:center;
+      ">
+        This is an automated message from Stark OPC Pvt Ltd.
+      </p>
+
+    </div>
 
   </div>
 
@@ -470,28 +508,73 @@ export const approveDriver = async (req: any, res: Response) => {
 </html>
 `;
 
-    await nylas.messages.send({
-      identifier: process.env.USER_GRANT_ID!,
-      requestBody: {
-        to: [
-          {
-            name: foundDriver.name,
-            email: foundDriver.email,
-          },
-        ],
-        subject: "Your Stark Driver account is approved",
-        body: approvalEmailTemplate,
+    // ------------------------------------
+    // SEND EMAIL USING NODEMAILER
+    // ------------------------------------
+
+    const mailInfo = await transporter.sendMail({
+      from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM_EMAIL}>`,
+
+      to: {
+        name: foundDriver.name,
+        address: foundDriver.email,
       },
+
+      subject: "Your Stark Driver account is approved",
+
+      html: approvalEmailTemplate,
+
+      // Plain-text fallback
+      text: `Hi ${foundDriver.name},
+
+Your driver application has been successfully approved.
+
+Your Stark Driver account is now active.
+
+You can now log in to the Stark Driver App and start accepting rides.
+${remark
+          ? `
+
+Admin remark:
+${remark}`
+          : ""
+        }
+
+Regards,
+Stark Team
+`,
     });
 
-    res.status(200).json({
+    console.log("Driver approval email sent:", {
+      messageId: mailInfo.messageId,
+      accepted: mailInfo.accepted,
+      rejected: mailInfo.rejected,
+      response: mailInfo.response,
+    });
+
+    // ------------------------------------
+    // RESPONSE
+    // ------------------------------------
+
+    return res.status(200).json({
       success: true,
       message: "Driver approved successfully",
       data: foundDriver,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error approving driver:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+
+    console.error("Email error details:", {
+      message: error?.message,
+      code: error?.code,
+      response: error?.response,
+      responseCode: error?.responseCode,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 

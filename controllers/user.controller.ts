@@ -7,6 +7,7 @@ import { Fare, Otp, Ride, RideRequest, User } from "../db/schema";
 import mongoose from "mongoose";
 import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
 import { hashOtp } from "../utils/hashOtp";
+import { transporter } from "../utils/mailer";
 
 
 
@@ -373,16 +374,30 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
     });
 
     const token = jwt.sign(
-      { user: { userId, name, email }, otp },
+      {
+        user: {
+          userId,
+          name,
+          email,
+        },
+        otp,
+      },
       process.env.EMAIL_ACTIVATION_SECRET!,
-      { expiresIn: "5m" }
+      {
+        expiresIn: "5m",
+      }
     );
 
-    console.log(`🪪 [EMAIL OTP SEND][${requestId}] Verification token created`);
+    console.log(
+      `🪪 [EMAIL OTP SEND][${requestId}] Verification token created`
+    );
 
     /* -------- REVIEW MODE -------- */
+
     if (process.env.REVIEW_MODE === "true") {
-      console.log(`🧪 [EMAIL OTP SEND][${requestId}] Review mode – skipping email`);
+      console.log(
+        `🧪 [EMAIL OTP SEND][${requestId}] Review mode – skipping email`
+      );
 
       return res.status(201).json({
         success: true,
@@ -391,11 +406,8 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
       });
     }
 
-    // --- LOGO URL ---
-    const logoUrl =
-      "https://res.cloudinary.com/starkcab/image/upload/v1765043362/App%20Logos/FullLogo_p0evhu.png";
+    /* -------- EMAIL TEMPLATE -------- */
 
-    // --- EMAIL TEMPLATE ---
     const emailTemplate = `
 <!DOCTYPE html>
 <html>
@@ -500,27 +512,63 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 `;
 
     console.log(
-      `📨 [EMAIL OTP SEND][${requestId}] Sending email via Nylas`
+      `📨 [EMAIL OTP SEND][${requestId}] Sending email via Gmail SMTP`
     );
 
-    await nylas.messages.send({
-      identifier: process.env.USER_GRANT_ID!,
-      requestBody: {
-        to: [{ name, email }],
-        subject: "Your Stark verification code",
-        body: emailTemplate,
+    /* -------- SEND EMAIL WITH NODEMAILER -------- */
+
+    const mailInfo = await transporter.sendMail({
+      from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM_EMAIL}>`,
+      to: {
+        name: name?.trim(),
+        address: email?.trim().toLowerCase(),
       },
+      subject: "Your Stark verification code",
+      html: emailTemplate,
+      text: `Hi ${name},
+
+Use the verification code below to complete your Stark registration.
+
+Verification code: ${otp}
+
+This code is valid for 5 minutes.
+
+If you did not request this code, you can safely ignore this email.
+
+Regards,
+Stark Team
+
+This is an automated message from Stark OPC Pvt Ltd.`,
     });
 
-    console.log(`✅ [EMAIL OTP SEND][${requestId}] Email sent successfully`);
+    console.log(
+      `✅ [EMAIL OTP SEND][${requestId}] Email sent successfully`,
+      {
+        messageId: mailInfo.messageId,
+        accepted: mailInfo.accepted,
+        rejected: mailInfo.rejected,
+        response: mailInfo.response,
+      }
+    );
 
-    res.status(201).json({ success: true, token });
+    return res.status(201).json({
+      success: true,
+      token,
+    });
+
   } catch (error: any) {
-    console.error(`🔥 [EMAIL OTP SEND][${requestId}] Error`, {
-      message: error.message,
-    });
 
-    res.status(400).json({
+    console.error(
+      `🔥 [EMAIL OTP SEND][${requestId}] Error`,
+      {
+        message: error.message,
+        code: error.code,
+        response: error.response,
+        responseCode: error.responseCode,
+      }
+    );
+
+    return res.status(400).json({
       success: false,
       message: error.message || "Error sending OTP email",
     });

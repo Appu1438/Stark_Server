@@ -9,6 +9,7 @@ import { hashOtp } from "../utils/hashOtp";
 import { isValidPhoneNumber } from "../utils/validatePhoneNumber";
 import { getRegistrationBonus } from "../utils/getBonus";
 import { generateReferralCode } from "../utils/generateReferralCode";
+import { transporter } from "../utils/mailer";
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
@@ -793,20 +794,43 @@ export const sendingOtpToEmail = async (req: Request, res: Response) => {
 </html>
 `;
 
-        console.log("📨 [EMAIL OTP] Sending email via Nylas");
+        console.log("📨 [EMAIL OTP] Sending email via Nodemailer");
 
-        await nylas.messages.send({
-            identifier: process.env.USER_GRANT_ID!,
-            requestBody: {
-                to: [{ name, email }],
-                subject: "Your Stark verification code",
-                body: emailTemplate,
+        // Send email using Nodemailer
+        const mailInfo = await transporter.sendMail({
+            from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM_EMAIL}>`,
+
+            to: {
+                name: name?.trim(),
+                address: email?.trim().toLowerCase(),
             },
+
+            subject: "Your Stark verification code",
+
+            html: emailTemplate,
+
+            // Plain-text fallback
+            text: `Hi ${name},
+
+Use the verification code below to complete your Stark registration.
+
+Verification code: ${otp}
+
+This code is valid for 5 minutes.
+
+If you did not request this code, you can safely ignore this email.
+
+Regards,
+Stark Team
+`,
         });
 
         console.log("✅ [EMAIL OTP] Email sent successfully");
+        console.log("📧 Message ID:", mailInfo.messageId);
+        console.log("📬 Accepted:", mailInfo.accepted);
+        console.log("📭 Rejected:", mailInfo.rejected);
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             token,
         });
