@@ -6,6 +6,7 @@ import { admin, adminAuditLog, driver, driverAuditLog, DriverWallet, Fare, Ride,
 import { generateAccessTokenAdmin, generateRefreshTokenAdmin } from "../utils/generateToken";
 import { nylas } from "../app";
 import { transporter } from "../utils/mailer";
+import { sendPushNotification } from "../utils/sendNotification";
 const axios = require("axios");
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
